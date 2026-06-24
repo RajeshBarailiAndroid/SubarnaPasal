@@ -210,16 +210,36 @@ body {
 }
 
 body.auth-pending .app {
-  visibility: hidden;
-}
-
-body.auth-pending .workspace,
-body.auth-pending .sidebar {
-  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
 }
 
 body.auth-ready .app {
-  visibility: visible;
+  opacity: 1;
+  transition: opacity 0.18s ease;
+}
+
+.app-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.85rem;
+  background: var(--bg);
+  color: var(--text);
+}
+
+body.auth-ready .app-loading {
+  display: none;
+}
+
+.app-loading p {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 500;
 }
 
 body.auth-signed-out .workspace {

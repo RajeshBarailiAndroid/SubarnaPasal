@@ -175,11 +175,28 @@ function handleAuthStateChange(event, session) {
 function revealAppShell() {
   document.body.classList.remove('auth-pending');
   document.body.classList.add('auth-ready');
+  const loader = document.getElementById('app-loading');
+  if (loader) loader.setAttribute('aria-busy', 'false');
 }
 
 function hideAppShellForRedirect() {
   document.body.classList.remove('auth-ready');
   document.body.classList.add('auth-pending');
+}
+
+let appShellFailsafeTimer = null;
+
+function scheduleAppShellFailsafe(ms = 10000) {
+  if (appShellFailsafeTimer) return;
+  appShellFailsafeTimer = window.setTimeout(() => {
+    if (document.body.classList.contains('auth-pending')) revealAppShell();
+  }, ms);
+}
+
+function clearAppShellFailsafe() {
+  if (!appShellFailsafeTimer) return;
+  window.clearTimeout(appShellFailsafeTimer);
+  appShellFailsafeTimer = null;
 }
 
 function bindAuthClient(client) {
@@ -189,6 +206,7 @@ function bindAuthClient(client) {
 }
 
 async function initAuth() {
+  if (isAppPage()) scheduleAppShellFailsafe();
   try {
     const res = await fetch('/api/auth/config');
     const cfg = await res.json();
@@ -268,6 +286,7 @@ async function initAuth() {
   } finally {
     authInitializing = false;
     if (!isAppPage()) revealAppShell();
+    clearAppShellFailsafe();
     authReadyResolve?.();
   }
 }

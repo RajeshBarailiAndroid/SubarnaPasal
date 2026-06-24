@@ -2504,11 +2504,10 @@ async function initApp() {
     if (typeof redirectToLogin === 'function') redirectToLogin();
     return;
   }
-  try {
-    await refreshAll();
-  } finally {
-    if (typeof revealAppShell === 'function') revealAppShell();
-  }
+  if (typeof revealAppShell === 'function') revealAppShell();
+  refreshAll().catch((err) => {
+    if (typeof toast === 'function') toast(err.message);
+  });
 }
 
 initApp().catch((err) => toast(err.message));
