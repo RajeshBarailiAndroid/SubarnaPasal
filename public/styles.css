@@ -209,12 +209,17 @@ body {
   background: var(--bg);
 }
 
-body.auth-pending .workspace {
+body.auth-pending .app {
   visibility: hidden;
 }
 
+body.auth-pending .workspace,
 body.auth-pending .sidebar {
   visibility: hidden;
+}
+
+body.auth-ready .app {
+  visibility: visible;
 }
 
 body.auth-signed-out .workspace {

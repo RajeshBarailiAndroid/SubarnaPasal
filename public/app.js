@@ -2500,11 +2500,15 @@ async function initApp() {
   setLanguage(currentLang);
   if (typeof waitForAuthReady === 'function') await waitForAuthReady();
   if (typeof getAuthAccessToken === 'function' && !(await getAuthAccessToken())) {
+    if (typeof revealAppShell === 'function') revealAppShell();
     if (typeof redirectToLogin === 'function') redirectToLogin();
     return;
   }
-  document.body.classList.remove('auth-pending');
-  await refreshAll();
+  try {
+    await refreshAll();
+  } finally {
+    if (typeof revealAppShell === 'function') revealAppShell();
+  }
 }
 
 initApp().catch((err) => toast(err.message));

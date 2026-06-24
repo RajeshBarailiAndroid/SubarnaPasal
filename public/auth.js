@@ -144,13 +144,19 @@ async function applyAuthSession(session) {
 
 let authStateSubscription = null;
 let authReadyResolve;
+let authInitializing = true;
 const authReady = new Promise((resolve) => {
   authReadyResolve = resolve;
 });
 
+const AUTH_BOOTSTRAP_EVENTS = new Set(['INITIAL_SESSION', 'TOKEN_REFRESHED']);
+
 function handleAuthStateChange(event, session) {
   signedInUser = session?.user || null;
   updateAuthUI(session);
+
+  if (AUTH_BOOTSTRAP_EVENTS.has(event) || authInitializing) return;
+
   if (event === 'SIGNED_IN') {
     refreshAccountProfile();
     if (isLoginPage() || isForgotPasswordPage()) {
@@ -164,6 +170,16 @@ function handleAuthStateChange(event, session) {
       });
     }
   }
+}
+
+function revealAppShell() {
+  document.body.classList.remove('auth-pending');
+  document.body.classList.add('auth-ready');
+}
+
+function hideAppShellForRedirect() {
+  document.body.classList.remove('auth-ready');
+  document.body.classList.add('auth-pending');
 }
 
 function bindAuthClient(client) {
@@ -180,7 +196,8 @@ async function initAuth() {
     if (!authEnabled) {
       if (isAppPage()) {
         document.body.classList.add('auth-signed-in');
-        document.body.classList.remove('auth-signed-out', 'auth-pending');
+        document.body.classList.remove('auth-signed-out');
+        revealAppShell();
       }
       return;
     }
@@ -234,6 +251,7 @@ async function initAuth() {
     }
 
     if (isAppPage()) {
+      hideAppShellForRedirect();
       redirectToLogin();
       return;
     }
@@ -243,9 +261,13 @@ async function initAuth() {
     }
   } catch (err) {
     console.warn('Auth init failed:', err);
-    if (isAppPage() && authEnabled) redirectToLogin();
+    if (isAppPage() && authEnabled) {
+      hideAppShellForRedirect();
+      redirectToLogin();
+    }
   } finally {
-    document.body.classList.remove('auth-pending');
+    authInitializing = false;
+    if (!isAppPage()) revealAppShell();
     authReadyResolve?.();
   }
 }
@@ -269,6 +291,7 @@ window.clearAuthErrors = clearAuthErrors;
 window.isAdminUser = isAdminUser;
 window.authToast = authToast;
 window.showAuthError = showAuthError;
+window.revealAppShell = revealAppShell;
 
 function updateAuthUI(session) {
   if (!isAppPage()) return;
