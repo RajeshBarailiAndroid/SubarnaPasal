@@ -45,7 +45,11 @@ async function main() {
   }
 
   const templatePath = path.join(__dirname, '..', 'supabase', 'per-user-data.sql');
-  const sql = fs.readFileSync(templatePath, 'utf8').replaceAll('YOUR_USER_UUID', userId);
+  let sql = fs.readFileSync(templatePath, 'utf8');
+  sql = sql.replace(
+    /owner_id uuid := '[^']+'/,
+    `owner_id uuid := '${userId}'`
+  );
 
   const outPath = path.join(__dirname, '..', 'supabase', 'migration-ready.sql');
   fs.writeFileSync(outPath, sql);
