@@ -1,25 +1,9 @@
--- Migration: add user_id for per-user data
--- Run in Supabase SQL Editor when you see: column "user_id" does not exist
---
--- EASIEST: open supabase/migrate-run.sql (no comments) → Select All → paste → Run
---
--- 1. Change owner_id below ONLY if you log in with a different account
---    (Supabase → Authentication → Users → copy UUID)
--- 2. Paste this entire file and click Run
---
--- Safe to re-run section 1 (uses IF NOT EXISTS).
-
--- ── 1. Add user_id columns ──────────────────────────────────────────────────
-
 alter table if exists settings add column if not exists user_id uuid references auth.users(id) on delete cascade;
 alter table if exists items add column if not exists user_id uuid references auth.users(id) on delete cascade;
 alter table if exists transactions add column if not exists user_id uuid references auth.users(id) on delete cascade;
 alter table if exists orders add column if not exists user_id uuid references auth.users(id) on delete cascade;
 alter table if exists customers add column if not exists user_id uuid references auth.users(id) on delete cascade;
 alter table if exists expenses add column if not exists user_id uuid references auth.users(id) on delete cascade;
-
--- ── 2. Backfill existing rows ───────────────────────────────────────────────
--- rajeshbaraili / rajeshsurunga@gmail.com — change if you use another login
 
 do $migration$
 declare
@@ -33,8 +17,6 @@ begin
   update expenses set user_id = owner_id where user_id is null;
 end
 $migration$;
-
--- ── 3. Drop legacy foreign keys (old schema linked transactions → items) ─────
 
 do $$
 declare
@@ -56,8 +38,6 @@ begin
     execute format('alter table %I drop constraint if exists %I', r.table_name, r.constraint_name);
   end loop;
 end $$;
-
--- ── 4. Fix primary keys and indexes ─────────────────────────────────────────
 
 alter table if exists settings drop constraint if exists settings_pkey;
 alter table if exists settings drop column if exists id;
