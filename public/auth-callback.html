@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Signing in…</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        display: grid;
+        place-items: center;
+        min-height: 100vh;
+        margin: 0;
+        color: #3d3a34;
+        background: #fcf9ed;
+      }
+    </style>
+  </head>
+  <body>
+    <p id="status">Signing in…</p>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+      (async () => {
+        const status = document.getElementById('status');
+        try {
+          const res = await fetch('/api/auth/config');
+          const cfg = await res.json();
+          if (!cfg.enabled) {
+            status.textContent = 'Auth is not configured.';
+            return;
+          }
+          const client = supabase.createClient(cfg.url, cfg.anonKey);
+          const { data: { session }, error } = await client.auth.getSession();
+          if (error) throw error;
+          if (session && window.opener) {
+            window.opener.postMessage({ type: 'supabase-auth', event: 'SIGNED_IN' }, window.location.origin);
+            status.textContent = 'Success! Closing…';
+            setTimeout(() => window.close(), 400);
+            return;
+          }
+          status.textContent = session ? 'Signed in. You can close this window.' : 'Sign-in incomplete. Close and try again.';
+        } catch (err) {
+          status.textContent = err.message || 'Sign-in failed.';
+        }
+      })();
+    </script>
+  </body>
+</html>
