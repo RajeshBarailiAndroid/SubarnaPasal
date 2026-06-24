@@ -8,6 +8,7 @@
     "dev": "node server.js",
     "migrate:supabase": "node scripts/migrate-to-supabase.js",
     "check:supabase": "node scripts/check-supabase.js",
+    "migrate:user-schema": "node scripts/generate-migration.js",
     "connect:github": "bash scripts/connect-github.sh"
   },
   "engines": {
