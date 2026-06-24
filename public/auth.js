@@ -39,11 +39,14 @@ function isAppPage() {
   return !isLoginPage() && !isResetPasswordPage() && !isForgotPasswordPage();
 }
 
+let loginRedirectPending = false;
+
 function redirectToLogin(query = '') {
   const target = `${LOGIN_PATH}${query}`;
-  if (`${window.location.pathname}${window.location.search}` !== target) {
-    window.location.replace(target);
-  }
+  if (`${window.location.pathname}${window.location.search}` === target) return;
+  if (loginRedirectPending) return;
+  loginRedirectPending = true;
+  window.location.replace(target);
 }
 
 function redirectToApp() {
@@ -139,7 +142,10 @@ async function applyAuthSession(session) {
     refresh_token: session.refresh_token
   });
   if (error) throw error;
-  updateAuthUI(session);
+  const { data: { session: stored } } = await authClient.auth.getSession();
+  if (!stored?.access_token) throw new Error(t('authLoginFailed'));
+  signedInUser = stored.user || null;
+  updateAuthUI(stored);
 }
 
 let authStateSubscription = null;
@@ -153,9 +159,13 @@ const AUTH_BOOTSTRAP_EVENTS = new Set(['INITIAL_SESSION', 'TOKEN_REFRESHED']);
 
 function handleAuthStateChange(event, session) {
   signedInUser = session?.user || null;
-  updateAuthUI(session);
 
-  if (AUTH_BOOTSTRAP_EVENTS.has(event) || authInitializing) return;
+  if (AUTH_BOOTSTRAP_EVENTS.has(event) || authInitializing) {
+    if (session?.user) updateAuthUI(session);
+    return;
+  }
+
+  updateAuthUI(session);
 
   if (event === 'SIGNED_IN') {
     refreshAccountProfile();
@@ -172,9 +182,21 @@ function handleAuthStateChange(event, session) {
   }
 }
 
+let appShellRevealed = false;
+
 function revealAppShell() {
+  if (appShellRevealed) return;
+  appShellRevealed = true;
+  clearAppShellFailsafe();
   document.body.classList.remove('auth-pending');
   document.body.classList.add('auth-ready');
+  if (isAppPage()) {
+    if (signedInUser) updateAuthUI({ user: signedInUser });
+    else if (!authEnabled) {
+      document.body.classList.add('auth-signed-in');
+      document.body.classList.remove('auth-signed-out');
+    }
+  }
   const loader = document.getElementById('app-loading');
   if (loader) loader.setAttribute('aria-busy', 'false');
 }
@@ -206,7 +228,6 @@ function bindAuthClient(client) {
 }
 
 async function initAuth() {
-  if (isAppPage()) scheduleAppShellFailsafe();
   try {
     const res = await fetch('/api/auth/config');
     const cfg = await res.json();
@@ -215,7 +236,6 @@ async function initAuth() {
       if (isAppPage()) {
         document.body.classList.add('auth-signed-in');
         document.body.classList.remove('auth-signed-out');
-        revealAppShell();
       }
       return;
     }
@@ -330,8 +350,11 @@ function updateAuthUI(session) {
   if (usersNavBtn) usersNavBtn.hidden = !isAdminSession(session);
 
   const canEdit = Boolean(session?.user) || !authEnabled;
+  const bootstrapping = document.body.classList.contains('auth-pending');
   document.body.classList.toggle('auth-signed-in', canEdit);
-  document.body.classList.toggle('auth-signed-out', authEnabled && !session?.user);
+  if (!bootstrapping || session?.user) {
+    document.body.classList.toggle('auth-signed-out', authEnabled && !session?.user);
+  }
 }
 
 function authToast(msg) {

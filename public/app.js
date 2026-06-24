@@ -2499,15 +2499,31 @@ async function initApp() {
   initDateDefaults();
   setLanguage(currentLang);
   if (typeof waitForAuthReady === 'function') await waitForAuthReady();
-  if (typeof getAuthAccessToken === 'function' && !(await getAuthAccessToken())) {
-    if (typeof revealAppShell === 'function') revealAppShell();
+
+  const authRequired = typeof isAuthRequired === 'function' && isAuthRequired();
+  const token = typeof getAuthAccessToken === 'function' ? await getAuthAccessToken() : null;
+  if (authRequired && !token) {
     if (typeof redirectToLogin === 'function') redirectToLogin();
     return;
   }
-  if (typeof revealAppShell === 'function') revealAppShell();
-  refreshAll().catch((err) => {
-    if (typeof toast === 'function') toast(err.message);
-  });
+
+  const revealFailsafe = window.setTimeout(() => {
+    if (typeof revealAppShell === 'function') revealAppShell();
+  }, 12000);
+
+  let shouldReveal = true;
+  try {
+    await refreshAll();
+  } catch (err) {
+    if (/sign in required/i.test(err.message)) {
+      shouldReveal = false;
+    } else if (typeof toast === 'function') {
+      toast(err.message);
+    }
+  } finally {
+    window.clearTimeout(revealFailsafe);
+    if (shouldReveal && typeof revealAppShell === 'function') revealAppShell();
+  }
 }
 
 initApp().catch((err) => toast(err.message));

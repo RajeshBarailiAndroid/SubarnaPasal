@@ -216,7 +216,6 @@ body.auth-pending .app {
 
 body.auth-ready .app {
   opacity: 1;
-  transition: opacity 0.18s ease;
 }
 
 .app-loading {
@@ -230,10 +229,13 @@ body.auth-ready .app {
   gap: 0.85rem;
   background: var(--bg);
   color: var(--text);
+  transition: opacity 0.25s ease, visibility 0s linear 0.25s;
 }
 
 body.auth-ready .app-loading {
-  display: none;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .app-loading p {
