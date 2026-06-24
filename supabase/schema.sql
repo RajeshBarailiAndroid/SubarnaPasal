@@ -1,6 +1,12 @@
 -- SubarnaPasal database schema (per-user data)
 -- Run ONCE in Supabase SQL Editor (Dashboard → SQL → New query)
 --
+-- IMPORTANT (production / Vercel):
+-- 1. Vercel → Settings → Environment Variables → copy SUPABASE_URL
+-- 2. Open that exact Supabase project in the dashboard
+-- 3. Paste this entire file and click Run
+-- 4. Run supabase/verify.sql to confirm tables exist
+--
 -- If you already ran an older schema, run supabase/per-user-data.sql instead.
 --
 -- Safe to re-run: all statements use IF NOT EXISTS.

@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 require('dotenv').config();
-const { getSupabase, isSupabaseEnabled } = require('../lib/supabase');
+const {
+  checkSupabaseConnection,
+  isSupabaseEnabled,
+  getSupabase
+} = require('../lib/supabase');
+const { REQUIRED_TABLES, CORE_TABLES } = require('../lib/db-schema');
 
 const PLACEHOLDER_PATTERNS = [
   'YOUR_PROJECT_REF',
@@ -10,7 +15,11 @@ const PLACEHOLDER_PATTERNS = [
 
 function envStatus() {
   const url = process.env.SUPABASE_URL || '';
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '';
+  const key =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SECRET_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    '';
 
   if (!url || !key) {
     return { ok: false, reason: 'Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in .env' };
@@ -52,32 +61,35 @@ async function main() {
     process.exit(1);
   }
 
-  const supabase = getSupabase();
-
-  const tables = ['settings', 'items', 'transactions', 'orders'];
-  for (const table of tables) {
-    const { error, count } = await supabase.from(table).select('*', { count: 'exact', head: true });
-    if (error) {
-      const detail = error.message || error.hint || error.code || 'unknown error';
-      console.log(`❌ Table "${table}": ${detail}`);
-      if (error.message.includes('does not exist') || error.code === '42P01') {
-        console.log('   → Run supabase/schema.sql in the SQL Editor first.');
-      }
-      process.exit(1);
+  const core = await checkSupabaseConnection();
+  if (!core.ok) {
+    console.log('❌ Database:', core.error || 'check failed');
+    if (core.setup) console.log(`   → ${core.setup}`);
+    if (core.missingTables?.length) {
+      console.log(`   → Missing: ${core.missingTables.join(', ')}`);
     }
-    console.log(`✓ Table "${table}": reachable (${count ?? 0} rows)`);
-  }
-
-  const { count: settingsCount, error: settingsError } = await supabase
-    .from('settings')
-    .select('*', { count: 'exact', head: true });
-
-  if (settingsError) {
-    console.log('❌ Settings read:', settingsError.message);
     process.exit(1);
   }
 
-  console.log(`✓ Settings rows: ${settingsCount ?? 0}`);
+  for (const table of CORE_TABLES) {
+    const row = core.tables?.[table];
+    console.log(`✓ Table "${table}": reachable (${row?.count ?? 0} rows)`);
+  }
+
+  const supabase = getSupabase();
+  const optional = REQUIRED_TABLES.filter((table) => !CORE_TABLES.includes(table));
+  for (const table of optional) {
+    const { error, count } = await supabase.from(table).select('*', { count: 'exact', head: true });
+    if (error) {
+      const detail = error.message || error.code || 'unknown error';
+      console.log(`⚠ Table "${table}": ${detail}`);
+      if (error.code === 'PGRST205' || /could not find the table/i.test(detail)) {
+        console.log('   → Run supabase/schema.sql in the SQL Editor.');
+      }
+      continue;
+    }
+    console.log(`✓ Table "${table}": reachable (${count ?? 0} rows)`);
+  }
 
   console.log('\n✅ Supabase connection OK');
 }
@@ -86,7 +98,7 @@ main().catch((err) => {
   const msg = err.message || String(err);
   if (msg.includes('fetch failed') || err.cause?.code === 'ENOTFOUND') {
     console.log('❌ Connection failed: cannot reach Supabase URL');
-    console.log('   → Check SUPABASE_URL in .env matches your project (Dashboard → Settings → API)');
+    console.log('   → Check SUPABASE_URL matches your project (Dashboard → Settings → API)');
     process.exit(1);
   }
   console.log('❌ Connection failed:', msg);
