@@ -3,7 +3,7 @@ const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
 const { readStore, writeStore, dataSourceLabel, ensureUserSettings, LOCAL_DEV_USER_ID } = require('./lib/store');
-const { getSupabase } = require('./lib/supabase');
+const { getSupabase, checkSupabaseConnection } = require('./lib/supabase');
 const {
   normalizeUsername,
   usernameToEmail,
@@ -351,19 +351,21 @@ async function buildReports(store, start, end) {
 }
 
 app.get('/api/health', asyncRoute(async (req, res) => {
+  const database = await checkSupabaseConnection();
   res.json({
-    ok: true,
-    dataSource: dataSourceLabel()
+    ok: database.ok || !database.valid,
+    dataSource: dataSourceLabel(),
+    database
   });
 }));
 
 app.get('/api/auth/config', (req, res) => {
-  const url = process.env.SUPABASE_URL || '';
+  const { readEnv } = require('./lib/env');
+  const url = readEnv('SUPABASE_URL');
   const anonKey =
-    process.env.SUPABASE_ANON_KEY ||
-    process.env.SUPABASE_PUBLISHABLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    '';
+    readEnv('SUPABASE_ANON_KEY') ||
+    readEnv('SUPABASE_PUBLISHABLE_KEY') ||
+    readEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY');
   const placeholders = ['YOUR_PROJECT_REF', 'your-anon-key', 'your-service-role-key'];
   const valid = Boolean(
     url &&
@@ -1125,7 +1127,11 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.listen(PORT, () => {
-  console.log(`SubarnaPasal running on http://localhost:${PORT}`);
-  console.log(`Data source: ${dataSourceLabel()}`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`SubarnaPasal running on http://localhost:${PORT}`);
+    console.log(`Data source: ${dataSourceLabel()}`);
+  });
+}
+
+module.exports = app;
