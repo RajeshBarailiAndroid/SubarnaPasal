@@ -192,7 +192,8 @@ function cartIcon() {
 }
 
 function shopLogoHtml(className = 'shop-logo') {
-  return `<img src="logo.svg" class="${className}" width="88" height="88" alt="Suvarnapasal" />`;
+  const alt = settingsCache.shopName || 'Suvarnapasal';
+  return `<img src="logo.svg" class="${className}" width="88" height="88" alt="${alt.replace(/"/g, '&quot;')}" />`;
 }
 
 function inventoryTableHead() {
@@ -1695,6 +1696,63 @@ async function persistStoreItemCategories() {
   }
 }
 
+let shopNameCheckTimer = null;
+
+function renderShopNameStatus({ available, checking, unchanged } = {}) {
+  const el = document.getElementById('shop-name-status');
+  const input = document.getElementById('settings-shop-name');
+  if (!el || !input) return;
+  if (unchanged) {
+    el.hidden = true;
+    el.textContent = '';
+    input.setCustomValidity('');
+    return;
+  }
+  if (checking) {
+    el.hidden = false;
+    el.textContent = '…';
+    el.className = 'form-hint shop-name-status';
+    input.setCustomValidity('');
+    return;
+  }
+  if (available) {
+    el.hidden = false;
+    el.textContent = t('shopNameAvailable');
+    el.className = 'form-hint shop-name-status is-available';
+    input.setCustomValidity('');
+  } else {
+    el.hidden = false;
+    el.textContent = t('shopNameTaken');
+    el.className = 'form-hint shop-name-status is-taken';
+    input.setCustomValidity(t('shopNameTaken'));
+  }
+}
+
+async function checkShopNameAvailability(name) {
+  const trimmed = String(name || '').trim();
+  const current = String(settingsCache.shopName || '').trim();
+  if (!trimmed || trimmed.toLowerCase() === current.toLowerCase()) {
+    renderShopNameStatus({ unchanged: true });
+    return true;
+  }
+  renderShopNameStatus({ checking: true });
+  try {
+    const payload = await api(`/api/settings/shop-name-available?name=${encodeURIComponent(trimmed)}`);
+    renderShopNameStatus({ available: Boolean(payload.available) });
+    return Boolean(payload.available);
+  } catch (_) {
+    renderShopNameStatus({ unchanged: true });
+    return true;
+  }
+}
+
+function scheduleShopNameCheck(name) {
+  clearTimeout(shopNameCheckTimer);
+  shopNameCheckTimer = setTimeout(() => {
+    checkShopNameAvailability(name).catch(() => renderShopNameStatus({ unchanged: true }));
+  }, 350);
+}
+
 function updateShopBranding(view = activeView) {
   const shop = settingsCache.shopName || 'Suvarnapasal';
   const brandEl = document.getElementById('brand-shop-name');
@@ -1735,6 +1793,7 @@ async function loadSettings() {
     storeForm.shopName.value = settings.shopName || 'Suvarnapasal';
     storeForm.shopAddress.value = settings.shopAddress || '';
     storeForm.shopPhone.value = settings.shopPhone || '';
+    renderShopNameStatus({ unchanged: true });
   }
   if (priceForm) {
     const mode = settings.priceMode || 'manual';
@@ -2905,6 +2964,7 @@ function nextBillNumber() {
 function getBillOptions() {
   return {
     showSign: document.getElementById('bill-show-sign')?.checked !== false,
+    showCustomerSign: document.getElementById('bill-show-customer-sign')?.checked !== false,
     showStamp: document.getElementById('bill-show-stamp')?.checked !== false,
     signatoryName: document.getElementById('bill-signatory-name')?.value.trim()
       || settingsCache.shopName
@@ -2912,17 +2972,29 @@ function getBillOptions() {
   };
 }
 
-function billSignatureBlock(options) {
-  if (!options.showSign) return '';
-  return `
-    <div class="bill-signatures">
-      <div class="bill-sign-block">
+function billSignaturesBlock(sale, options) {
+  if (!options.showSign && !options.showCustomerSign) return '';
+  const blocks = [];
+  if (options.showCustomerSign) {
+    const customerName = sale.customer || '—';
+    blocks.push(`
+      <div class="bill-sign-block bill-sign-block-customer">
+        <div class="bill-sign-line">
+          <span class="bill-sign-name">${customerName}</span>
+        </div>
+        <span class="bill-sign-label">${t('customerSignature')}</span>
+      </div>`);
+  }
+  if (options.showSign) {
+    blocks.push(`
+      <div class="bill-sign-block bill-sign-block-authorized">
         <div class="bill-sign-line">
           <span class="bill-sign-name">${options.signatoryName}</span>
         </div>
         <span class="bill-sign-label">${t('authorizedSignatory')}</span>
-      </div>
-    </div>`;
+      </div>`);
+  }
+  return `<div class="bill-signatures bill-signatures-dual">${blocks.join('')}</div>`;
 }
 
 function billStampBlock(options) {
@@ -3016,7 +3088,7 @@ function buildBillHtml(sale, options = getBillOptions()) {
           ${billStampBlock(options)}
         </div>
 
-        ${billSignatureBlock(options)}
+        ${billSignaturesBlock(sale, options)}
 
         <p class="bill-thanks">${t('thankYou')}</p>
         <p class="bill-footer-note">${t('saleReceipt')} · ${sale.billNumber}</p>
@@ -3526,7 +3598,7 @@ document.getElementById('checkout-btn')?.addEventListener('click', () => checkou
 document.getElementById('close-bill-modal')?.addEventListener('click', () => document.getElementById('bill-modal')?.close());
 document.getElementById('bill-done-btn')?.addEventListener('click', () => document.getElementById('bill-modal')?.close());
 document.getElementById('print-bill-btn')?.addEventListener('click', () => window.print());
-['bill-show-sign', 'bill-show-stamp'].forEach((id) => {
+['bill-show-sign', 'bill-show-stamp', 'bill-show-customer-sign'].forEach((id) => {
   document.getElementById(id)?.addEventListener('change', refreshBillPreview);
 });
 document.getElementById('bill-signatory-name')?.addEventListener('input', refreshBillPreview);
@@ -3682,21 +3754,40 @@ document.getElementById('orders-content')?.addEventListener('click', async (e) =
 document.getElementById('settings-store-form')?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const fd = new FormData(e.target);
+  const shopName = String(fd.get('shopName') || '').trim();
+  if (!shopName) {
+    toast(t('shopNameRequired'));
+    return;
+  }
+  const available = await checkShopNameAvailability(shopName);
+  if (!available) {
+    toast(t('shopNameTaken'));
+    return;
+  }
   try {
-    await api('/api/settings', {
+    const updated = await api('/api/settings', {
       method: 'PATCH',
       body: JSON.stringify({
-        shopName: fd.get('shopName'),
+        shopName,
         shopAddress: fd.get('shopAddress'),
         shopPhone: fd.get('shopPhone')
       })
     });
-    settingsCache.shopName = String(fd.get('shopName') || '').trim() || settingsCache.shopName;
-    settingsCache.shopAddress = String(fd.get('shopAddress') || '').trim();
-    settingsCache.shopPhone = String(fd.get('shopPhone') || '').trim();
+    settingsCache.shopName = updated.shopName || shopName;
+    settingsCache.shopAddress = String(updated.shopAddress || fd.get('shopAddress') || '').trim();
+    settingsCache.shopPhone = String(updated.shopPhone || fd.get('shopPhone') || '').trim();
     updateShopBranding();
+    const signatory = document.getElementById('bill-signatory-name');
+    if (signatory && (!signatory.value || signatory.value === 'Suvarnapasal' || signatory.value === 'SubarnaPasal')) {
+      signatory.value = settingsCache.shopName;
+    }
+    renderShopNameStatus({ unchanged: true });
     toast(t('settingsSaved'));
   } catch (err) { toast(err.message); }
+});
+
+document.getElementById('settings-shop-name')?.addEventListener('input', (e) => {
+  scheduleShopNameCheck(e.target.value);
 });
 
 document.getElementById('settings-form')?.addEventListener('submit', async (e) => {

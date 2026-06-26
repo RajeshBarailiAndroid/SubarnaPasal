@@ -433,7 +433,11 @@
                 <h2 data-i18n="storeInfo">Store Information</h2>
                 <p class="panel-desc" data-i18n="storeInfoDesc">Update your store's basic details.</p>
                 <form id="settings-store-form" class="settings-form">
-                  <label><span data-i18n="shopName">Store display name</span><input name="shopName" required /></label>
+                  <label class="settings-shop-name-field">
+                    <span data-i18n="shopName">Store display name</span>
+                    <input name="shopName" id="settings-shop-name" required autocomplete="organization" />
+                    <p id="shop-name-status" class="form-hint shop-name-status" hidden></p>
+                  </label>
                   <label><span data-i18n="storeAddress">Address</span><input name="shopAddress" /></label>
                   <label><span data-i18n="storePhone">Contact Phone</span><input name="shopPhone" type="tel" data-i18n-placeholder="storePhonePlaceholder" placeholder="(555) 123-4567" /></label>
                   <button type="submit" class="btn btn-gold" data-i18n="saveStoreInfo">Save Store Info</button>
@@ -755,7 +759,11 @@
       <div class="bill-options" id="bill-options">
         <label class="bill-option">
           <input type="checkbox" id="bill-show-sign" checked />
-          <span data-i18n="showSignature">Show signature</span>
+          <span data-i18n="showSignature">Show authorized signature</span>
+        </label>
+        <label class="bill-option">
+          <input type="checkbox" id="bill-show-customer-sign" checked />
+          <span data-i18n="showCustomerSignature">Show customer signature</span>
         </label>
         <label class="bill-option">
           <input type="checkbox" id="bill-show-stamp" checked />

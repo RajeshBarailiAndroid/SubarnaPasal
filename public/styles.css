@@ -1624,6 +1624,34 @@ th {
   border-top: 1px dashed rgba(201, 168, 76, 0.45);
 }
 
+.bill-signatures-dual {
+  justify-content: space-between;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.bill-sign-block-customer {
+  margin-right: auto;
+}
+
+.bill-sign-block-authorized {
+  margin-left: auto;
+}
+
+.shop-name-status.is-available {
+  color: var(--success, #2d6a4f);
+}
+
+.shop-name-status.is-taken {
+  color: var(--danger);
+}
+
+.settings-shop-name-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
 .bill-sign-block {
   text-align: center;
   width: min(220px, 50%);

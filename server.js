@@ -2,7 +2,15 @@ require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const crypto = require('crypto');
-const { readStore, writeStore, dataSourceLabel, ensureUserSettings, LOCAL_DEV_USER_ID } = require('./lib/store');
+const {
+  readStore,
+  writeStore,
+  dataSourceLabel,
+  ensureUserSettings,
+  isShopNameTaken,
+  normalizeShopName,
+  LOCAL_DEV_USER_ID
+} = require('./lib/store');
 const { getSupabase, checkSupabaseConnection } = require('./lib/supabase');
 const {
   normalizeUsername,
@@ -823,6 +831,13 @@ app.get('/api/settings', asyncRoute(async (req, res) => {
   });
 }));
 
+app.get('/api/settings/shop-name-available', asyncRoute(async (req, res) => {
+  const name = String(req.query.name || '').trim();
+  if (!name) return res.json({ available: false });
+  const taken = await isShopNameTaken(name, req.userId);
+  res.json({ available: !taken });
+}));
+
 app.patch('/api/settings', asyncRoute(async (req, res) => {
   const store = await readStore(req.userId);
   const now = new Date().toISOString();
@@ -847,6 +862,11 @@ app.patch('/api/settings', asyncRoute(async (req, res) => {
   if (req.body.shopName != null) {
     const name = String(req.body.shopName).trim();
     if (!name) return res.status(400).json({ error: 'Shop name is required.' });
+    if (normalizeShopName(name) !== normalizeShopName(store.settings.shopName)) {
+      if (await isShopNameTaken(name, req.userId)) {
+        return res.status(409).json({ error: 'This store name is already taken. Please choose another name.' });
+      }
+    }
     store.settings.shopName = name;
   }
 
