@@ -1596,6 +1596,10 @@ app.patch('/api/orders/:id', asyncRoute(async (req, res) => {
     revertOrderCompletion(store, order);
   }
 
+  if (nextStatus === 'cancelled' && order.status === 'completed') {
+    revertOrderCompletion(store, order);
+  }
+
   if (body.customerName != null) order.customerName = String(body.customerName).trim();
   if (body.customerPhone != null) order.customerPhone = String(body.customerPhone).trim();
   if (body.note != null) order.note = String(body.note).trim();

@@ -2628,6 +2628,10 @@ function orderStatusBadge(status) {
   return `<span class="badge order-${cls}">${t(key)}</span>`;
 }
 
+function orderCancelButton(id) {
+  return `<button type="button" class="link-btn danger" data-order-action="cancelled" data-order-id="${id}">${t('cancelOrder')}</button>`;
+}
+
 function orderActionButtons(order) {
   const actions = [];
   const id = order.id;
@@ -2650,12 +2654,13 @@ function orderActionButtons(order) {
   }
   if (['pending', 'confirmed', 'progress', 'ready'].includes(order.status)) {
     actions.push(`<button type="button" class="link-btn" data-order-action="completed" data-order-id="${id}">${t('completeOrder')}</button>`);
-    actions.push(`<button type="button" class="link-btn danger" data-order-action="cancelled" data-order-id="${id}">${t('cancelOrder')}</button>`);
-    actions.push(`<button type="button" class="link-btn danger" data-order-delete="${id}">${t('delete')}</button>`);
   }
   if (order.status === 'completed') {
     actions.push(`<button type="button" class="link-btn order-option-btn" data-order-action="ready" data-order-revert="completed" data-order-id="${id}">${t('orderReady')}</button>`);
     actions.push(`<button type="button" class="link-btn order-option-btn" data-order-action="progress" data-order-revert="completed" data-order-id="${id}">${t('orderProgress')}</button>`);
+  }
+  if (order.status !== 'cancelled') {
+    actions.push(orderCancelButton(id));
   }
   return actions.join('');
 }
@@ -5074,15 +5079,12 @@ document.getElementById('orders-content')?.addEventListener('click', async (e) =
     return;
   }
   const actionBtn = e.target.closest('[data-order-action]');
-  const deleteBtn = e.target.closest('[data-order-delete]');
   if (actionBtn?.dataset.orderId && actionBtn.dataset.orderAction) {
+    const action = actionBtn.dataset.orderAction;
     if (actionBtn.dataset.orderRevert === 'completed' && !confirm(t('orderStatusRevertConfirm'))) return;
-    try { await updateOrderStatus(actionBtn.dataset.orderId, actionBtn.dataset.orderAction); } catch (err) { toast(err.message); }
-  }
-  if (deleteBtn?.dataset.orderDelete && confirm(t('deleteOrderConfirm'))) {
+    if (action === 'cancelled' && !confirm(t('cancelOrderConfirm'))) return;
     try {
-      await api(`/api/orders/${deleteBtn.dataset.orderDelete}`, { method: 'DELETE' });
-      toast(t('orderDeleted'));
+      await updateOrderStatus(actionBtn.dataset.orderId, action);
     } catch (err) { toast(err.message); }
   }
 });
