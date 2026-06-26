@@ -1514,7 +1514,13 @@ app.post('/api/orders', asyncRoute(async (req, res) => {
       }
       : null;
     if (!itemName) return res.status(400).json({ error: 'Item name is required.' });
-    if (weightGrams <= 0) return res.status(400).json({ error: 'Weight is required.' });
+    const hasTolaWeight = weightUnit === 'tola' && tolaParts
+      && (tolaParts.tola || tolaParts.aana || tolaParts.laal);
+    if (weightUnit === 'tola') {
+      if (!hasTolaWeight) return res.status(400).json({ error: 'Weight is required.' });
+    } else if (weightGrams <= 0) {
+      return res.status(400).json({ error: 'Weight is required.' });
+    }
     const unitPrice = calcGoldPriceNpr(weightGrams, makingCharge, goldRate, weightUnit, tolaParts);
     line = {
       itemId: `custom-${Date.now()}`,
@@ -1550,6 +1556,11 @@ app.post('/api/orders', asyncRoute(async (req, res) => {
     createdAt: now,
     updatedAt: now
   };
+
+  upsertCustomerInStore(store, {
+    name: customerName,
+    phone: order.customerPhone
+  });
 
   store.orders.unshift(order);
   await writeStore(store, req.userId);

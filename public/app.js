@@ -4918,15 +4918,24 @@ document.getElementById('print-bill-btn')?.addEventListener('click', () => windo
 });
 document.getElementById('bill-signatory-name')?.addEventListener('input', refreshBillPreview);
 
+function resolveOrderCustomerName(form) {
+  const hidden = String(form.customerName?.value || '').trim();
+  if (hidden) return hidden;
+  return String(document.getElementById('order-customer-search')?.value || '').trim();
+}
+
 document.getElementById('order-form')?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const form = e.target;
-  if (!String(form.customerName.value || '').trim()) {
+  const customerName = resolveOrderCustomerName(form);
+  if (!customerName) {
     toast(t('customerNamePrompt'));
     return;
   }
+  form.customerName.value = customerName;
   const fd = new FormData(form);
   const body = Object.fromEntries(fd.entries());
+  body.customerName = customerName;
   body.quantity = Number(body.quantity) || 1;
 
   if (orderModalContext === 'pos' || body.orderItemMode === 'custom') {
