@@ -207,6 +207,7 @@ function inventoryTableHead() {
     <th>${t('stock')}</th>
     <th>${t('status')}</th>
     <th class="sortable">${t('priceInfo')}${sortIcon()}</th>
+    <th>${t('options')}</th>
   </tr></thead>`;
 }
 
@@ -582,6 +583,103 @@ function getWeightGramsFromForm(form, prefix = '') {
   return Number(form.elements[names.gramsName]?.value) || 0;
 }
 
+function getTolaPartsFromForm(form, prefix = '') {
+  const names = weightFieldNames(prefix);
+  return {
+    tola: Number(form.elements[names.tolaName]?.value) || 0,
+    aana: Number(form.elements[names.aanaName]?.value) || 0,
+    laal: Number(form.elements[names.laalName]?.value) || 0
+  };
+}
+
+function calcGoldMetalNpr({ grams = 0, unit = 'grams', tolaParts = null, ratePerTolaNpr = goldRateCache } = {}) {
+  const rate = Number(ratePerTolaNpr) || 0;
+  if (!rate) return 0;
+  if (unit === 'tola' && tolaParts) {
+    const t = Number(tolaParts.tola) || 0;
+    const a = Number(tolaParts.aana) || 0;
+    const l = Number(tolaParts.laal) || 0;
+    if (!t && !a && !l) return 0;
+    const rateAana = rate / AANA_PER_TOLA;
+    const rateLaal = rate / LAAL_PER_TOLA;
+    return t * rate + a * rateAana + l * rateLaal;
+  }
+  const g = Number(grams) || 0;
+  if (g <= 0) return 0;
+  return g * (rate / TOLA_GRAMS);
+}
+
+function formatGoldWeightPriceBreakdown(tolaParts, ratePerTolaNpr, makingChargeNpr = 0) {
+  const rate = Number(ratePerTolaNpr) || 0;
+  if (!rate || !tolaParts) return '';
+  const rateAana = rate / AANA_PER_TOLA;
+  const rateLaal = rate / LAAL_PER_TOLA;
+  const bits = [];
+  const t = Number(tolaParts.tola) || 0;
+  const a = Number(tolaParts.aana) || 0;
+  const l = Number(tolaParts.laal) || 0;
+  if (t) bits.push(`${t} ${t('calcTola')} × ${formatMoney(rate)}`);
+  if (a) bits.push(`${a} ${t('calcAana')} × ${formatMoney(rateAana)}`);
+  if (l) bits.push(`${formatWeightQty(l, 4)} ${t('calcLaal')} × ${formatMoney(rateLaal)}`);
+  if (!bits.length) return '';
+  const metal = calcGoldMetalNpr({ unit: 'tola', tolaParts, ratePerTolaNpr: rate });
+  const making = Number(makingChargeNpr) || 0;
+  const total = metal + making;
+  return `${bits.join(' + ')}${making ? ` + ${t('calcMakingCharge')} ${formatMoney(making)}` : ''} = ${formatMoney(total)}`;
+}
+
+function renderOrderPriceBreakdown({ weightUnit, weightGrams, tolaParts, makingChargeNpr, qty = 1, ratePerTolaNpr = getGoldRatePerTolaNpr() }) {
+  const rate = Number(ratePerTolaNpr) || 0;
+  if (!rate) return '';
+  const making = Number(makingChargeNpr) || 0;
+  let metalNpr = 0;
+  let weightRows = '';
+
+  if (weightUnit === 'tola' && tolaParts && (tolaParts.tola || tolaParts.aana || tolaParts.laal)) {
+    const rateAana = rate / AANA_PER_TOLA;
+    const rateLaal = rate / LAAL_PER_TOLA;
+    const rows = [];
+    if (tolaParts.tola) {
+      const sub = tolaParts.tola * rate;
+      metalNpr += sub;
+      rows.push(`<tr><th>${t('calcTola')}</th><td>${tolaParts.tola} × ${formatMoney(rate)} = ${formatMoney(sub)}</td></tr>`);
+    }
+    if (tolaParts.aana) {
+      const sub = tolaParts.aana * rateAana;
+      metalNpr += sub;
+      rows.push(`<tr><th>${t('calcAana')}</th><td>${tolaParts.aana} × ${formatMoney(rateAana)} = ${formatMoney(sub)}</td></tr>`);
+    }
+    if (tolaParts.laal) {
+      const sub = tolaParts.laal * rateLaal;
+      metalNpr += sub;
+      rows.push(`<tr><th>${t('calcLaal')}</th><td>${formatWeightQty(tolaParts.laal, 4)} × ${formatMoney(rateLaal)} = ${formatMoney(sub)}</td></tr>`);
+    }
+    weightRows = rows.join('');
+  } else if (weightGrams > 0) {
+    const rateGram = rate / TOLA_GRAMS;
+    metalNpr = weightGrams * rateGram;
+    weightRows = `<tr><th>${t('calcGrams')}</th><td>${formatWeightQty(weightGrams, 4)} g × ${formatMoney(rateGram)} = ${formatMoney(metalNpr)}</td></tr>`;
+  } else {
+    return '';
+  }
+
+  const unitTotal = metalNpr + making;
+  const orderTotal = unitTotal * qty;
+  const qtyRow = qty > 1
+    ? `<tr><th>${t('quantity')}</th><td>${formatMoney(unitTotal)} × ${qty} = ${formatMoney(orderTotal)}</td></tr>`
+    : '';
+
+  return `
+    <table class="gold-calc-table gold-price-summary">
+      <tbody>
+        ${weightRows}
+        <tr><th>${t('calcMakingCharge')}</th><td>${formatMoney(making)}</td></tr>
+        ${qtyRow}
+        <tr class="gold-calc-total-row"><th>${t('calcTotalPrice')}</th><td><strong>${formatMoney(orderTotal)}</strong></td></tr>
+      </tbody>
+    </table>`;
+}
+
 function updateWeightEntryHint(entry) {
   if (!entry) return;
   const hint = entry.querySelector('.weight-conversion-hint');
@@ -674,6 +772,18 @@ function initWeightEntry(entry) {
 
 function initAllWeightEntries() {
   document.querySelectorAll('.weight-entry').forEach(initWeightEntry);
+}
+
+function syncWeightEntryPanels(form, prefix = '') {
+  const entry = getWeightEntryEl(form, prefix);
+  if (!entry) return;
+  initWeightEntry(entry);
+  setWeightEntryPanels(entry, getWeightUnit(form, prefix));
+  updateWeightEntryHint(entry);
+}
+
+function getGoldRatePerTolaNpr() {
+  return Number(goldRateCache) || 0;
 }
 
 function getCalcMetal() {
@@ -861,13 +971,49 @@ function renderGoldPriceResult() {
     box.innerHTML = `<p class="gold-calc-empty">${t('calcEnterWeightCost')}</p>`;
     return;
   }
-  const { qty: weightQty, label: weightLabel } = getGoldCalcPriceWeight(ctx);
-  const goldValueNpr = weightQty * rateNpr;
+  let weightRows = '';
+  let goldValueNpr = 0;
+  if (ctx.unit === 'tola') {
+    const tolaParts = {
+      tola: Number(ctx.tolaInput) || 0,
+      aana: Number(ctx.aanaInput) || 0,
+      laal: Number(ctx.laalInput) || 0
+    };
+    const rateAana = rateNpr / AANA_PER_TOLA;
+    const rateLaal = rateNpr / LAAL_PER_TOLA;
+    const rows = [];
+    if (tolaParts.tola) {
+      const sub = tolaParts.tola * rateNpr;
+      goldValueNpr += sub;
+      rows.push(`<tr><th>${t('calcTola')}</th><td>${tolaParts.tola} × ${formatMoney(rateNpr)} = ${formatMoney(sub)}</td></tr>`);
+    }
+    if (tolaParts.aana) {
+      const sub = tolaParts.aana * rateAana;
+      goldValueNpr += sub;
+      rows.push(`<tr><th>${t('calcAana')}</th><td>${tolaParts.aana} × ${formatMoney(rateAana)} = ${formatMoney(sub)}</td></tr>`);
+    }
+    if (tolaParts.laal) {
+      const sub = tolaParts.laal * rateLaal;
+      goldValueNpr += sub;
+      rows.push(`<tr><th>${t('calcLaal')}</th><td>${formatWeightQty(tolaParts.laal, 4)} × ${formatMoney(rateLaal)} = ${formatMoney(sub)}</td></tr>`);
+    }
+    if (!rows.length) {
+      const { qty: weightQty, label: weightLabel } = getGoldCalcPriceWeight(ctx);
+      goldValueNpr = weightQty * rateNpr;
+      weightRows = `<tr><th>${t('calcWeightTimesRate')}</th><td>${weightLabel} × ${formatMoney(rateNpr)} = ${formatMoney(goldValueNpr)}</td></tr>`;
+    } else {
+      weightRows = rows.join('');
+    }
+  } else {
+    const { qty: weightQty, label: weightLabel } = getGoldCalcPriceWeight(ctx);
+    goldValueNpr = weightQty * rateNpr;
+    weightRows = `<tr><th>${t('calcWeightTimesRate')}</th><td>${weightLabel} × ${formatMoney(rateNpr)} = ${formatMoney(goldValueNpr)}</td></tr>`;
+  }
   const totalNpr = goldValueNpr + makingNpr;
   box.innerHTML = `
     <table class="gold-calc-table gold-price-summary">
       <tbody>
-        <tr><th>${t('calcWeightTimesRate')}</th><td>${weightLabel} × ${formatMoney(rateNpr)} = ${formatMoney(goldValueNpr)}</td></tr>
+        ${weightRows}
         <tr><th>${t('calcMakingCharge')}</th><td>${formatMoney(makingNpr)}</td></tr>
         <tr class="gold-calc-total-row"><th>${t('calcTotalPrice')}</th><td><strong>${formatMoney(totalNpr)}</strong></td></tr>
       </tbody>
@@ -1073,6 +1219,18 @@ function initQuickCalculator() {
   document.addEventListener('keydown', handleQuickCalcKeydown);
 }
 
+let orderModalContext = 'order';
+
+function updateOrderModalChrome() {
+  const isPos = orderModalContext === 'pos';
+  const title = document.getElementById('order-modal-title');
+  const submitBtn = document.getElementById('order-submit-btn');
+  const segment = document.querySelector('#order-modal .order-item-mode');
+  if (title) title.textContent = t(isPos ? 'addCustomItemTitle' : 'addOrderTitle');
+  if (submitBtn) submitBtn.textContent = t(isPos ? 'addToCart' : 'createOrder');
+  if (segment) segment.hidden = isPos;
+}
+
 function isOrderCustomItemMode(form) {
   const mode = form?.elements.orderItemMode?.value;
   return mode === 'custom';
@@ -1109,6 +1267,31 @@ function setOrderItemMode(form, mode) {
 function itemMarketValue(item, rate) {
   const gold = (Number(item.weightGrams) / TOLA_GRAMS) * rate * (item.karat / 24);
   return Math.round(gold + (Number(item.makingCharge) || 0));
+}
+
+function calcGoldPriceNpr(weightGrams, makingChargeNpr = 0, unit = 'grams', tolaParts = null, ratePerTolaNpr = getGoldRatePerTolaNpr()) {
+  const metal = calcGoldMetalNpr({ grams: weightGrams, unit, tolaParts, ratePerTolaNpr });
+  if (metal <= 0) return 0;
+  return metal + (Number(makingChargeNpr) || 0);
+}
+
+function itemPriceFromForm(form, prefix = '') {
+  const weightGrams = getWeightGramsFromForm(form, prefix);
+  const weightUnit = getWeightUnit(form, prefix);
+  const tolaParts = weightUnit === 'tola' ? getTolaPartsFromForm(form, prefix) : null;
+  const makingCharge = parseMoneyField(form.makingCharge?.value) || 0;
+  if (!Number.isFinite(weightGrams) || weightGrams <= 0) return null;
+  return calcGoldPriceNpr(weightGrams, makingCharge, weightUnit, tolaParts);
+}
+
+function getItemCalculatedPriceNpr(item) {
+  return calcGoldPriceNpr(item.weightGrams, item.makingCharge || 0, 'grams');
+}
+
+function getItemDisplayPrice(item) {
+  const manual = Number(item.salePrice);
+  if (Number.isFinite(manual) && manual > 0) return manual;
+  return getItemCalculatedPriceNpr(item);
 }
 
 function toast(msg, type) {
@@ -1286,6 +1469,7 @@ async function updateMetalRates(settings) {
     if (rateEdit) rateEdit.hidden = false;
     refreshMetalPriceFields();
     updateGoldCalculator();
+    updateOrderTotalPreview();
     return;
   }
 
@@ -1303,6 +1487,7 @@ async function updateMetalRates(settings) {
   if (rateEdit) rateEdit.hidden = false;
   refreshMetalPriceFields();
   updateGoldCalculator();
+  updateOrderTotalPreview();
 }
 
 function updateMetalRatePreviews() {
@@ -1799,7 +1984,7 @@ function renderPosCatalog() {
   const sort = document.getElementById('pos-sort')?.value || 'name';
   let visible = [...posItemsCache].filter((item) => Number(item.quantity) > 0);
   if (sort === 'price') {
-    visible.sort((a, b) => itemMarketValue(a, goldRateCache) - itemMarketValue(b, goldRateCache));
+    visible.sort((a, b) => getItemDisplayPrice(a) - getItemDisplayPrice(b));
   } else {
     visible.sort((a, b) => a.name.localeCompare(b.name));
   }
@@ -1850,7 +2035,7 @@ function renderPosCatalog() {
               <td>${categoryLabel(item.category)}</td>
               <td><span class="product-stock product-stock-inline">${qty}</span></td>
               <td>${itemStockStatusBadge(displayItem)}</td>
-              <td class="pos-item-price">${formatMoney(itemMarketValue(item, goldRateCache))}</td>
+              <td class="pos-item-price">${formatMoney(getItemDisplayPrice(item))}</td>
               <td class="pos-list-action-col">
                 <button type="button" class="product-cart-btn" data-pos-add-cart="${item.id}" title="${t('addToCart')}" aria-label="${t('addToCart')}">${cartIcon()}</button>
               </td>
@@ -1866,7 +2051,7 @@ function renderInventoryTable() {
   if (!tableEl) return;
 
   if (!itemsCache.length) {
-    tableEl.innerHTML = `<table class="data-table">${inventoryTableHead()}<tbody><tr class="empty-row"><td colspan="10">${t('noResults')}</td></tr></tbody></table>`;
+    tableEl.innerHTML = `<table class="data-table">${inventoryTableHead()}<tbody><tr class="empty-row"><td colspan="11">${t('noResults')}</td></tr></tbody></table>`;
     return;
   }
 
@@ -1877,29 +2062,51 @@ function renderInventoryTable() {
       const displayItem = itemStockStatusForDisplay(i);
       return `<tr>
         <td><input type="checkbox" aria-label="Select row" /></td>
-        <td class="name-cell">
-          <strong>${i.name}</strong>
-          <span class="row-actions">
-            <button type="button" class="link-btn" data-edit="${i.id}">${t('edit')}</button>
-            <button type="button" class="link-btn danger" data-delete="${i.id}">${t('delete')}</button>
-          </span>
-        </td>
+        <td class="name-cell"><strong>${i.name}</strong></td>
         <td>${i.sku}</td><td>${categoryLabel(i.category)}</td>
         <td>${i.location || '—'}</td>
         <td>${i.weightGrams}</td><td>${i.karat}K</td><td>${qty}</td>
         <td>${itemStockStatusBadge(displayItem)}</td>
-        <td>${formatMoney(itemMarketValue(i, goldRatePerTola))}</td>
+        <td>${formatMoney(getItemDisplayPrice(i))}</td>
+        <td class="options-cell inventory-actions-cell">
+          <button type="button" class="link-btn" data-edit="${i.id}">${t('edit')}</button>
+          <button type="button" class="link-btn danger" data-delete="${i.id}">${t('delete')}</button>
+        </td>
       </tr>`;
     }).join('')}
   </tbody></table>`;
 }
 
 function customItemPriceFromFields(form) {
-  const weightGrams = getWeightGramsFromForm(form, '');
-  const karat = Number(form.karat.value);
-  const makingCharge = parseMoneyField(form.makingCharge.value) || 0;
-  if (!Number.isFinite(weightGrams) || weightGrams <= 0) return null;
-  return itemMarketValue({ weightGrams, karat, makingCharge }, goldRateCache);
+  return itemPriceFromForm(form, '');
+}
+
+function updateItemPricePreview() {
+  const form = document.getElementById('item-form');
+  const preview = document.getElementById('item-price-preview');
+  const breakdownEl = document.getElementById('item-price-breakdown');
+  if (!form || !preview) return;
+  const calculated = itemPriceFromForm(form, '');
+  preview.value = calculated != null ? formatMoney(calculated) : '—';
+  const salePriceInput = form.salePrice;
+  if (salePriceInput && !salePriceInput.value && calculated != null) {
+    salePriceInput.placeholder = formatMoneyPlain(calculated);
+  }
+  if (breakdownEl) {
+    const weightGrams = getWeightGramsFromForm(form, '');
+    const weightUnit = getWeightUnit(form, '');
+    const tolaParts = weightUnit === 'tola' ? getTolaPartsFromForm(form, '') : null;
+    const makingCharge = parseMoneyField(form.makingCharge?.value) || 0;
+    const html = renderOrderPriceBreakdown({
+      weightUnit,
+      weightGrams,
+      tolaParts,
+      makingChargeNpr: makingCharge,
+      qty: 1
+    });
+    breakdownEl.innerHTML = html;
+    breakdownEl.hidden = !html;
+  }
 }
 
 function updateCustomItemPricePreview() {
@@ -1955,41 +2162,31 @@ function fillCustomItemCustomerFields(customer) {
 }
 
 function openCustomItemModal() {
-  if (!ensurePosCustomerName()) return;
-  const form = document.getElementById('custom-item-form');
-  const modal = document.getElementById('custom-item-modal');
-  if (!form || !modal) return;
-  form.reset();
-  form.quantity.value = 1;
-  form.makingCharge.value = 0;
-  form.hallmark.checked = true;
-  renderCategorySelect(form.category, { defaultValue: 'other' });
-  form.category.value = 'other';
-  const weightEntry = getWeightEntryEl(form, '');
-  if (form.elements.weightUnit) form.elements.weightUnit.value = 'grams';
-  setWeightEntryPanels(weightEntry, 'grams');
-  setWeightFieldsFromGrams(form, '', '');
-
-  const currentName = getSaleCustomerName();
-  const currentPhone = selectedCustomer?.phone || '';
-  form.customerName.value = currentName;
-  form.customerPhone.value = currentPhone;
-  const search = document.getElementById('custom-item-customer-search');
-  if (search) search.value = currentName;
-
-  updateCustomItemPricePreview();
-  modal.showModal();
+  openOrderModal({ context: 'pos' }).catch(() => {});
 }
 
 function addCustomItemToCart(data) {
   try { requireSignedInSync(); } catch (err) { toast(err.message); return; }
   const itemName = String(data.name || '').trim();
   const qty = Math.max(1, Number(data.quantity) || 1);
-  const calculated = itemMarketValue({
-    weightGrams: Number(data.weightGrams),
-    karat: Number(data.karat),
-    makingCharge: parseMoneyField(data.makingCharge) || 0
-  }, goldRateCache);
+  const calculated = data.weightUnit === 'tola' && data.tolaParts
+    ? calcGoldPriceNpr(
+      Number(data.weightGrams),
+      parseMoneyField(data.makingCharge) || 0,
+      'tola',
+      data.tolaParts
+    )
+    : data.weightUnit
+      ? calcGoldPriceNpr(
+        Number(data.weightGrams),
+        parseMoneyField(data.makingCharge) || 0,
+        data.weightUnit
+      )
+      : itemMarketValue({
+        weightGrams: Number(data.weightGrams),
+        karat: Number(data.karat),
+        makingCharge: parseMoneyField(data.makingCharge) || 0
+      }, goldRateCache);
   const manualPrice = data.salePrice !== '' && data.salePrice != null
     ? parseMoneyField(data.salePrice)
     : null;
@@ -2013,7 +2210,7 @@ function addCustomItemToCart(data) {
   }
 
   const sku = generateSku('CUSTOM');
-  const karat = Number(data.karat) || 22;
+  const karat = Number(data.karat) || 24;
   const weightGrams = Number(data.weightGrams) || 0;
 
   posCart.push({
@@ -2050,7 +2247,7 @@ function addToCart(item) {
       sku: item.sku,
       name: item.name,
       qty: 1,
-      price: itemMarketValue(item, goldRateCache)
+      price: getItemDisplayPrice(item)
     });
   }
   renderCart();
@@ -2063,33 +2260,33 @@ function addOrderToCart(order) {
     return;
   }
 
-  for (const line of order.lines) {
-    const item = itemsCache.find((i) => i.id === line.itemId)
-      || orderItemsCache.find((i) => i.id === line.itemId)
-      || posItemsCache.find((i) => i.id === line.itemId);
+  order.lines.forEach((line, index) => {
+    const item = getItemFromCaches(line.itemId);
     const qty = Math.max(1, Number(line.quantity) || 1);
-    if (item && cartQtyForItem(item.id) + qty > Number(item.quantity)) {
-      toast(t('noStock'));
-      return;
-    }
     const price = Number(line.unitPrice)
-      || (item ? itemMarketValue(item, goldRateCache) : 0);
-    const existing = posCart.find((l) => l.itemId === line.itemId);
+      || (item ? getItemDisplayPrice(item) : 0);
+    const cartKey = `order-${order.id}-${line.itemId || index}`;
+    const existing = posCart.find((l) => l.cartKey === cartKey);
 
     if (existing) {
       existing.qty += qty;
       if (price) existing.price = price;
       if (!existing.name) existing.name = line.itemName || item?.name || existing.sku;
-    } else {
-      posCart.push({
-        itemId: line.itemId,
-        sku: line.sku || item?.sku || '—',
-        name: line.itemName || item?.name || t('item'),
-        qty,
-        price
-      });
+      return;
     }
-  }
+
+    posCart.push({
+      cartKey,
+      itemId: cartKey,
+      fromOrder: order.id,
+      orderNumber: order.orderNumber,
+      custom: true,
+      sku: line.sku || item?.sku || '—',
+      name: line.itemName || item?.name || t('item'),
+      qty,
+      price
+    });
+  });
 
   if (order.customerName) {
     applyPosCustomer({
@@ -2134,15 +2331,22 @@ function selectPosCustomer(customer) {
   applyPosCustomer(customer);
 }
 
+function isNonInventoryCartLine(line) {
+  return Boolean(line?.custom || line?.fromOrder);
+}
+
 function cartQtyForItem(itemId) {
-  if (!itemId || String(itemId).startsWith('custom-')) return 0;
+  if (!itemId) return 0;
+  const id = String(itemId);
+  if (id.startsWith('custom-') || id.startsWith('order-')) return 0;
   return posCart
-    .filter((line) => line.itemId === itemId && !line.custom)
+    .filter((line) => line.itemId === itemId && !isNonInventoryCartLine(line))
     .reduce((sum, line) => sum + line.qty, 0);
 }
 
 function getItemFromCaches(itemId) {
   return itemsCache.find((i) => i.id === itemId)
+    || orderItemsCache.find((i) => i.id === itemId)
     || posItemsCache.find((i) => i.id === itemId);
 }
 
@@ -2578,17 +2782,51 @@ function updateOrderTotalPreview() {
   const totalEl = document.getElementById('order-total-preview');
   const qty = Number(form.quantity.value) || 1;
   if (isOrderCustomItemMode(form)) {
-    const name = String(form.customItemName?.value || '').trim();
     const weightGrams = getWeightGramsFromForm(form, 'custom');
-    const karat = Number(form.customKarat?.value) || 22;
+    const weightUnit = getWeightUnit(form, 'custom');
+    const tolaParts = weightUnit === 'tola' ? getTolaPartsFromForm(form, 'custom') : null;
     const makingCharge = parseMoneyField(form.customMakingCharge?.value) || 0;
-    if (!name || weightGrams <= 0) {
+    const breakdownEl = document.getElementById('order-price-breakdown');
+    const hasWeight = weightUnit === 'tola'
+      ? Boolean(tolaParts && (tolaParts.tola || tolaParts.aana || tolaParts.laal))
+      : weightGrams > 0;
+    if (!hasWeight) {
       if (totalEl) totalEl.value = '';
+      if (breakdownEl) {
+        breakdownEl.hidden = true;
+        breakdownEl.innerHTML = '';
+      }
       return;
     }
-    const unit = itemMarketValue({ weightGrams, karat, makingCharge }, goldRateCache);
-    if (totalEl) totalEl.value = formatMoney(unit * qty);
+    const rateNpr = getGoldRatePerTolaNpr();
+    if (!rateNpr) {
+      if (totalEl) totalEl.value = '—';
+      if (breakdownEl) {
+        breakdownEl.hidden = true;
+        breakdownEl.innerHTML = '';
+      }
+      return;
+    }
+    const unitTotal = calcGoldPriceNpr(weightGrams, makingCharge, weightUnit, tolaParts, rateNpr);
+    if (totalEl) totalEl.value = formatMoney(unitTotal * qty);
+    if (breakdownEl) {
+      const html = renderOrderPriceBreakdown({
+        weightUnit,
+        weightGrams,
+        tolaParts,
+        makingChargeNpr: makingCharge,
+        qty,
+        ratePerTolaNpr: rateNpr
+      });
+      breakdownEl.innerHTML = html;
+      breakdownEl.hidden = !html;
+    }
     return;
+  }
+  const breakdownEl = document.getElementById('order-price-breakdown');
+  if (breakdownEl) {
+    breakdownEl.hidden = true;
+    breakdownEl.innerHTML = '';
   }
   const item = orderItemsCache.find((i) => i.id === form.itemId?.value);
   if (!item || !totalEl) {
@@ -2596,13 +2834,33 @@ function updateOrderTotalPreview() {
     updateOrderItemWeightPreview();
     return;
   }
-  totalEl.value = formatMoney(itemMarketValue(item, goldRateCache) * qty);
+  totalEl.value = formatMoney(getItemDisplayPrice(item) * qty);
   updateOrderItemWeightPreview();
 }
 
 async function updateOrderStatus(orderId, status) {
   await api(`/api/orders/${orderId}`, { method: 'PATCH', body: JSON.stringify({ status }) });
   toast(t('orderUpdated'));
+}
+
+function itemPayloadFromForm(form, fd) {
+  const quantity = Math.max(0, Number(fd.get('quantity')) || 0);
+  const status = fd.get('status') || 'in_stock';
+  return {
+    sku: String(fd.get('sku') || '').trim() || generateSku(),
+    name: String(fd.get('name') || '').trim(),
+    category: fd.get('category') || 'other',
+    karat: Number(fd.get('karat')) || 24,
+    weightGrams: getWeightGramsFromForm(form, ''),
+    makingCharge: parseMoneyField(fd.get('makingCharge') || 0),
+    purchaseCost: parseMoneyField(fd.get('purchaseCost') || 0),
+    salePrice: fd.get('salePrice') ? parseMoneyField(fd.get('salePrice')) : 0,
+    quantity: status === 'sold_out' ? 0 : (status === 'in_stock' && quantity <= 0 ? 1 : quantity),
+    status,
+    location: String(fd.get('location') || '').trim(),
+    hallmark: fd.get('hallmark') === 'on',
+    notes: String(fd.get('notes') || '').trim()
+  };
 }
 
 function openItemModal(item) {
@@ -2617,18 +2875,26 @@ function openItemModal(item) {
       const field = form.elements[k];
       if (!field) return;
       if (field.type === 'checkbox') field.checked = Boolean(v);
-      else if (['makingCharge', 'purchaseCost'].includes(k)) field.value = formatMoneyField(v);
+      else if (['makingCharge', 'purchaseCost', 'salePrice'].includes(k)) field.value = formatMoneyField(v);
       else field.value = v;
     });
     ensureCategoryOption(form.category, item.category);
     form.category.value = item.category || 'other';
     form.sku.value = item.sku || generateSku();
     setWeightFieldsFromGrams(form, item.weightGrams, '');
+    syncWeightEntryPanels(form, '');
   } else {
     form.category.value = 'other';
     form.sku.value = generateSku();
+    form.karat.value = '24';
+    form.makingCharge.value = 0;
+    form.quantity.value = 1;
+    form.hallmark.checked = true;
+    if (form.elements.weightUnit) form.elements.weightUnit.value = 'grams';
+    syncWeightEntryPanels(form, '');
     setWeightFieldsFromGrams(form, '', '');
   }
+  updateItemPricePreview();
   document.getElementById('item-modal').showModal();
 }
 
@@ -2785,7 +3051,11 @@ async function checkoutSale() {
   const totals = getSaleTotals();
 
   for (const line of cartSnapshot) {
-    if (line.custom) {
+    if (isNonInventoryCartLine(line)) {
+      const orderRef = line.orderNumber || line.fromOrder;
+      const note = line.fromOrder
+        ? `Order ${orderRef} — ${customer}${line.sku ? ` · ${line.sku}` : ''}`
+        : `POS — ${customer} · ${line.sku || 'CUSTOM'}${line.karat ? ` · ${line.karat}K` : ''}${line.weightGrams ? ` · ${line.weightGrams}g` : ''}${line.notes ? ` · ${line.notes}` : ''}`;
       await api('/api/transactions', {
         method: 'POST',
         body: JSON.stringify({
@@ -2794,7 +3064,7 @@ async function checkoutSale() {
           itemName: line.name,
           quantity: line.qty,
           amount: line.price * line.qty,
-          note: `POS — ${customer} · ${line.sku || 'CUSTOM'}${line.karat ? ` · ${line.karat}K` : ''}${line.weightGrams ? ` · ${line.weightGrams}g` : ''}${line.notes ? ` · ${line.notes}` : ''}`
+          note
         })
       });
     } else {
@@ -2861,7 +3131,7 @@ function populateOrderItemSelect() {
   if (!select) return;
   select.innerHTML = orderItemsCache.length
     ? orderItemsCache.map((i) => {
-      const price = formatMoney(itemMarketValue(i, goldRateCache));
+      const price = formatMoney(getItemDisplayPrice(i));
       return `<option value="${i.id}">${i.sku} — ${i.name} · ${price} (${i.quantity} ${t('inStockCount')})</option>`;
     }).join('')
     : `<option value="">${t('noStock')}</option>`;
@@ -2888,7 +3158,16 @@ function renderOrderCustomerSuggestions() {
   if (!matches.length) {
     box.hidden = true;
     box.innerHTML = '';
-    form.customerName.value = input.value.trim();
+    const name = input.value.trim();
+    if (name) {
+      form.customerName.value = name;
+      form.customerPhone.value = '';
+      renderOrderCustomerDisplay({ name, phone: '', email: '' });
+    } else {
+      form.customerName.value = '';
+      form.customerPhone.value = '';
+      renderOrderCustomerDisplay(null);
+    }
     return;
   }
   box.hidden = false;
@@ -2899,6 +3178,39 @@ function renderOrderCustomerSuggestions() {
     </button>`).join('');
 }
 
+function renderOrderCustomerDisplay(customer) {
+  const box = document.getElementById('order-customer-display');
+  const nameEl = document.getElementById('order-customer-display-name');
+  const phoneEl = document.getElementById('order-customer-display-phone');
+  const emailEl = document.getElementById('order-customer-display-email');
+  const name = String(customer?.name || '').trim();
+  if (!box) return;
+  if (!name) {
+    box.hidden = true;
+    if (nameEl) nameEl.textContent = '';
+    if (phoneEl) phoneEl.textContent = '—';
+    if (emailEl) emailEl.textContent = '—';
+    return;
+  }
+  box.hidden = false;
+  if (nameEl) nameEl.textContent = name;
+  if (phoneEl) phoneEl.textContent = String(customer?.phone || '').trim() || '—';
+  if (emailEl) emailEl.textContent = String(customer?.email || '').trim() || '—';
+}
+
+function clearOrderCustomer() {
+  const form = document.getElementById('order-form');
+  if (form) {
+    form.customerName.value = '';
+    form.customerPhone.value = '';
+  }
+  const search = document.getElementById('order-customer-search');
+  if (search) search.value = '';
+  const box = document.getElementById('order-customer-suggestions');
+  if (box) { box.hidden = true; box.innerHTML = ''; }
+  renderOrderCustomerDisplay(null);
+}
+
 function fillOrderCustomerFields(customer) {
   const form = document.getElementById('order-form');
   const search = document.getElementById('order-customer-search');
@@ -2906,32 +3218,36 @@ function fillOrderCustomerFields(customer) {
   if (!form) return;
   form.customerName.value = customer.name || '';
   form.customerPhone.value = customer.phone || '';
-  if (search) search.value = customer.name || '';
+  if (search) search.value = '';
   if (box) { box.hidden = true; box.innerHTML = ''; }
+  renderOrderCustomerDisplay(customer);
 }
 
-async function openOrderModal() {
+async function openOrderModal({ context = 'order' } = {}) {
   const form = document.getElementById('order-form');
   const modal = document.getElementById('order-modal');
   if (!form || !modal) return;
+  orderModalContext = context;
   form.reset();
   form.quantity.value = 1;
   if (form.customMakingCharge) form.customMakingCharge.value = 0;
-  setOrderItemMode(form, 'inventory');
-  const search = document.getElementById('order-customer-search');
-  if (search) search.value = '';
+  if (form.customKarat) form.customKarat.value = '24';
+  syncWeightEntryPanels(form, 'custom');
+  setOrderItemMode(form, 'custom');
+  clearOrderCustomer();
+  updateOrderModalChrome();
 
-  if (!orderItemsCache.length) {
-    try {
-      const payload = await api('/api/items?status=in_stock');
-      orderItemsCache = payload.items.filter((i) => i.quantity > 0);
-      applyMetalRatesFromResponse(payload);
-    } catch (_) { /* ignore */ }
+  if (context === 'pos' && selectedCustomer?.name) {
+    fillOrderCustomerFields(selectedCustomer);
   }
+
+  try {
+    const payload = await api('/api/items?status=in_stock');
+    orderItemsCache = payload.items.filter((i) => i.quantity > 0);
+    applyMetalRatesFromResponse(payload);
+  } catch (_) { /* ignore */ }
   populateOrderItemSelect();
-  if (!orderItemsCache.length) {
-    setOrderItemMode(form, 'custom');
-  }
+  updateOrderTotalPreview();
   modal.showModal();
 }
 
@@ -2971,6 +3287,7 @@ document.getElementById('refresh-inventory')?.addEventListener('click', () => lo
 document.getElementById('add-order-btn')?.addEventListener('click', () => openOrderModal().catch(() => {}));
 document.getElementById('refresh-orders')?.addEventListener('click', () => loadOrders().catch((e) => toast(e.message)));
 document.getElementById('order-add-customer')?.addEventListener('click', openCustomerModal);
+document.getElementById('clear-order-customer-btn')?.addEventListener('click', clearOrderCustomer);
 document.getElementById('order-customer-search')?.addEventListener('input', renderOrderCustomerSuggestions);
 document.getElementById('order-customer-search')?.addEventListener('focus', renderOrderCustomerSuggestions);
 document.getElementById('order-customer-suggestions')?.addEventListener('click', (e) => {
@@ -2987,11 +3304,7 @@ document.getElementById('order-form')?.addEventListener('click', (e) => {
   }
 });
 document.getElementById('order-form')?.addEventListener('input', (e) => {
-  if (e.target.name === 'customerName') {
-    const search = document.getElementById('order-customer-search');
-    if (search) search.value = e.target.value;
-  }
-  if (['itemId', 'quantity', 'customItemName', 'customKarat', 'customMakingCharge'].includes(e.target.name)
+  if (['itemId', 'quantity', 'customItemName', 'customKarat', 'customMakingCharge', 'customWeightUnit'].includes(e.target.name)
     || e.target.closest('#order-custom-fields .weight-entry')) {
     updateOrderTotalPreview();
   }
@@ -3000,7 +3313,7 @@ document.getElementById('order-form')?.addEventListener('weight-updated', () => 
   updateOrderTotalPreview();
 });
 document.getElementById('order-form')?.addEventListener('change', (e) => {
-  if (e.target.name === 'itemId') {
+  if (e.target.name === 'itemId' || e.target.name === 'customWeightUnit') {
     updateOrderTotalPreview();
   }
 });
@@ -3070,23 +3383,38 @@ document.getElementById('close-customer-modal')?.addEventListener('click', () =>
 document.getElementById('cancel-customer-modal')?.addEventListener('click', () => document.getElementById('customer-modal').close());
 document.getElementById('close-modal')?.addEventListener('click', () => document.getElementById('item-modal').close());
 document.getElementById('cancel-modal')?.addEventListener('click', () => document.getElementById('item-modal').close());
+document.getElementById('item-modal')?.addEventListener('close', () => { editingId = null; });
+document.getElementById('item-form')?.addEventListener('input', (e) => {
+  if (['karat', 'makingCharge', 'salePrice', 'weightUnit'].includes(e.target.name)
+    || e.target.closest('#item-form .weight-entry')) {
+    updateItemPricePreview();
+  }
+});
+document.getElementById('item-form')?.addEventListener('weight-updated', updateItemPricePreview);
+document.getElementById('item-form')?.addEventListener('change', (e) => {
+  if (e.target.name === 'weightUnit') updateItemPricePreview();
+  if (e.target.name === 'status') {
+    const form = e.target.form;
+    const qtyEl = form?.elements?.quantity;
+    if (!qtyEl) return;
+    if (e.target.value === 'in_stock' && Number(qtyEl.value) <= 0) qtyEl.value = 1;
+    if (e.target.value === 'sold_out') qtyEl.value = 0;
+  }
+});
 
 document.getElementById('item-form')?.addEventListener('submit', async (e) => {
   e.preventDefault();
-  const fd = new FormData(e.target);
-  const body = Object.fromEntries(fd.entries());
-  body.hallmark = fd.get('hallmark') === 'on';
-  body.karat = Number(body.karat);
-  body.weightGrams = getWeightGramsFromForm(e.target, '');
+  const form = e.target;
+  const fd = new FormData(form);
+  const body = itemPayloadFromForm(form, fd);
+  if (!body.name) {
+    toast(t('customItemNameRequired'));
+    return;
+  }
   if (body.weightGrams <= 0) {
     toast(t('weightRequired'));
     return;
   }
-  body.makingCharge = parseMoneyField(body.makingCharge || 0);
-  body.purchaseCost = parseMoneyField(body.purchaseCost || 0);
-  body.quantity = Number(body.quantity);
-  body.category = body.category || 'other';
-  if (!body.sku) body.sku = generateSku();
   try {
     if (editingId) {
       await api(`/api/items/${editingId}`, { method: 'PUT', body: JSON.stringify(body) });
@@ -3100,15 +3428,16 @@ document.getElementById('item-form')?.addEventListener('submit', async (e) => {
 });
 
 document.getElementById('inventory-table')?.addEventListener('click', async (e) => {
-  const editId = e.target.dataset.edit;
-  const deleteId = e.target.dataset.delete;
-  if (editId) {
-    const item = itemsCache.find((i) => i.id === editId);
+  const editBtn = e.target.closest('[data-edit]');
+  const deleteBtn = e.target.closest('[data-delete]');
+  if (editBtn?.dataset.edit) {
+    const item = itemsCache.find((i) => i.id === editBtn.dataset.edit);
     if (item) openItemModal(item);
+    return;
   }
-  if (deleteId && confirm(t('deleteConfirm'))) {
+  if (deleteBtn?.dataset.delete && confirm(t('deleteConfirm'))) {
     try {
-      await api(`/api/items/${deleteId}`, { method: 'DELETE' });
+      await api(`/api/items/${deleteBtn.dataset.delete}`, { method: 'DELETE' });
       toast(t('itemDeleted'));
     } catch (err) { toast(err.message); }
   }
@@ -3205,10 +3534,15 @@ document.getElementById('bill-signatory-name')?.addEventListener('input', refres
 document.getElementById('order-form')?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const form = e.target;
+  if (!String(form.customerName.value || '').trim()) {
+    toast(t('customerNamePrompt'));
+    return;
+  }
   const fd = new FormData(form);
   const body = Object.fromEntries(fd.entries());
   body.quantity = Number(body.quantity) || 1;
-  if (body.orderItemMode === 'custom') {
+
+  if (orderModalContext === 'pos' || body.orderItemMode === 'custom') {
     const weightGrams = getWeightGramsFromForm(form, 'custom');
     if (!String(body.customItemName || '').trim()) {
       toast(t('customItemNameRequired'));
@@ -3218,10 +3552,39 @@ document.getElementById('order-form')?.addEventListener('submit', async (e) => {
       toast(t('weightRequired'));
       return;
     }
+    if (orderModalContext === 'pos') {
+      addCustomItemToCart({
+        customerName: body.customerName,
+        customerPhone: body.customerPhone,
+        category: 'other',
+        name: body.customItemName,
+        karat: body.customKarat,
+        weightGrams,
+        weightUnit: getWeightUnit(form, 'custom'),
+        tolaParts: getWeightUnit(form, 'custom') === 'tola' ? getTolaPartsFromForm(form, 'custom') : null,
+        makingCharge: body.customMakingCharge,
+        quantity: body.quantity,
+        location: '',
+        hallmark: true,
+        notes: body.note || '',
+        salePrice: ''
+      });
+      document.getElementById('order-modal').close();
+      form.reset();
+      form.quantity.value = 1;
+      if (form.customKarat) form.customKarat.value = '24';
+      syncWeightEntryPanels(form, 'custom');
+      clearOrderCustomer();
+      return;
+    }
     body.customItem = {
       name: String(body.customItemName || '').trim(),
-      karat: Number(body.customKarat) || 22,
+      karat: Number(body.customKarat) || 24,
       weightGrams,
+      weightUnit: getWeightUnit(form, 'custom'),
+      weightTola: Number(form.customWeightTola?.value) || 0,
+      weightAana: Number(form.customWeightAana?.value) || 0,
+      weightLaal: Number(form.customWeightLaal?.value) || 0,
       makingCharge: parseMoneyField(body.customMakingCharge || 0)
     };
     delete body.itemId;
@@ -3232,6 +3595,8 @@ document.getElementById('order-form')?.addEventListener('submit', async (e) => {
     document.getElementById('order-modal').close();
     e.target.reset();
     e.target.quantity.value = 1;
+    syncWeightEntryPanels(e.target, 'custom');
+    clearOrderCustomer();
     orderGroup = 'progress';
     setOrderGroup('progress');
   } catch (err) { toast(err.message); }
@@ -3253,9 +3618,6 @@ document.getElementById('customer-form')?.addEventListener('submit', (e) => {
   document.getElementById('customer-modal').close();
   toast(t('customerSaved'));
   selectPosCustomer(customers[0]);
-  if (document.getElementById('custom-item-modal')?.open) {
-    fillCustomItemCustomerFields(customers[0]);
-  }
   if (document.getElementById('order-modal')?.open) {
     fillOrderCustomerFields(customers[0]);
   }
@@ -3341,14 +3703,24 @@ document.getElementById('settings-form')?.addEventListener('submit', async (e) =
   e.preventDefault();
   const fd = new FormData(e.target);
   try {
+    const goldRatePerTola = parseTolaFromGramInput(fd.get('goldRatePerGram'));
+    const silverRatePerTola = parseTolaFromGramInput(fd.get('silverRatePerGram') || 0);
+    const priceMode = fd.get('priceMode');
     await api('/api/settings', {
       method: 'PATCH',
-      body: JSON.stringify({
-        goldRatePerTola: parseTolaFromGramInput(fd.get('goldRatePerGram')),
-        silverRatePerTola: parseTolaFromGramInput(fd.get('silverRatePerGram') || 0),
-        priceMode: fd.get('priceMode')
-      })
+      body: JSON.stringify({ goldRatePerTola, silverRatePerTola, priceMode })
     });
+    settingsPriceMode = priceMode === 'api' ? 'api' : 'manual';
+    settingsCache.priceMode = settingsPriceMode;
+    goldRateCache = goldRatePerTola;
+    silverRateCache = silverRatePerTola;
+    if (settingsPriceMode === 'api') {
+      await updateMetalRates({ priceMode: 'api' });
+    } else {
+      refreshMetalPriceFields();
+      updateGoldCalculator();
+    }
+    refreshDisplayPrices();
     toast(t('settingsSaved'));
   } catch (err) { toast(err.message); }
 });

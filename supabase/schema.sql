@@ -38,6 +38,7 @@ create table if not exists items (
   weight_grams numeric default 0,
   making_charge numeric default 0,
   purchase_cost numeric default 0,
+  sale_price numeric default 0,
   quantity integer default 0,
   status text default 'in_stock',
   location text default '',

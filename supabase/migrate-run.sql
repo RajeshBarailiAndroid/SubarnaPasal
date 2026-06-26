@@ -1,5 +1,6 @@
 alter table if exists settings add column if not exists user_id uuid references auth.users(id) on delete cascade;
 alter table if exists items add column if not exists user_id uuid references auth.users(id) on delete cascade;
+alter table if exists items add column if not exists sale_price numeric default 0;
 alter table if exists transactions add column if not exists user_id uuid references auth.users(id) on delete cascade;
 alter table if exists orders add column if not exists user_id uuid references auth.users(id) on delete cascade;
 alter table if exists customers add column if not exists user_id uuid references auth.users(id) on delete cascade;

@@ -527,7 +527,7 @@
     <dialog id="order-modal" class="modal modal-wide">
       <form id="order-form" method="dialog">
         <header class="modal-head">
-          <h2 data-i18n="addOrderTitle">New order</h2>
+          <h2 data-i18n="addOrderTitle" id="order-modal-title">New order</h2>
           <button type="button" class="icon-btn" id="close-order-modal">×</button>
         </header>
 
@@ -541,9 +541,24 @@
           <button type="button" class="btn btn-outline btn-xs modal-inline-btn" id="order-add-customer">
             <span data-i18n="addCustomer">+ Add New Customer</span>
           </button>
-          <div class="form-grid modal-section-grid">
-            <label><span data-i18n="customerName">Customer name</span><input name="customerName" required /></label>
-            <label><span data-i18n="customerPhone">Phone</span><input name="customerPhone" type="tel" data-i18n-placeholder="customerPhonePlaceholder" placeholder="(555) 123-4567" /></label>
+          <input type="hidden" name="customerName" />
+          <input type="hidden" name="customerPhone" />
+          <div id="order-customer-display" class="pos-customer-display order-customer-display" hidden>
+            <div class="pos-customer-display-head">
+              <button type="button" class="icon-btn pos-customer-clear-btn" id="clear-order-customer-btn" data-i18n-title="clearCustomer" title="Clear customer" aria-label="Clear customer">×</button>
+            </div>
+            <div class="pos-customer-display-row">
+              <span class="pos-customer-display-label" data-i18n="customerName">Customer name</span>
+              <strong id="order-customer-display-name"></strong>
+            </div>
+            <div class="pos-customer-display-row">
+              <span class="pos-customer-display-label" data-i18n="customerPhone">Phone</span>
+              <strong id="order-customer-display-phone">—</strong>
+            </div>
+            <div class="pos-customer-display-row">
+              <span class="pos-customer-display-label" data-i18n="email">Email</span>
+              <strong id="order-customer-display-email">—</strong>
+            </div>
           </div>
         </fieldset>
 
@@ -551,26 +566,26 @@
           <legend data-i18n="orderDetails">Order details</legend>
           <p class="panel-desc order-source-desc" data-i18n="orderItemSource">How would you like to add the item?</p>
           <div class="segmented-control order-item-mode" role="tablist" aria-label="Order item source">
-            <button type="button" class="segment-btn is-active" data-order-item-mode="inventory" role="tab" aria-selected="true">
+            <button type="button" class="segment-btn" data-order-item-mode="inventory" role="tab" aria-selected="false">
               <span data-i18n="orderFromInventory">Select from inventory</span>
             </button>
-            <button type="button" class="segment-btn" data-order-item-mode="custom" role="tab" aria-selected="false">
+            <button type="button" class="segment-btn is-active" data-order-item-mode="custom" role="tab" aria-selected="true">
               <span data-i18n="orderCustomItem">Add custom item</span>
             </button>
           </div>
-          <input type="hidden" name="orderItemMode" value="inventory" />
-          <div id="order-inventory-fields" class="order-source-panel">
+          <input type="hidden" name="orderItemMode" value="custom" />
+          <div id="order-inventory-fields" class="order-source-panel" hidden>
             <p class="form-hint" data-i18n="orderInventoryHint">Choose an in-stock item from your inventory.</p>
             <div class="form-grid">
               <label class="span-2"><span data-i18n="item">Item</span><select name="itemId" id="order-item-select"></select></label>
               <p id="order-item-weight-preview" class="form-hint span-2" hidden></p>
             </div>
           </div>
-          <div id="order-custom-fields" class="order-source-panel" hidden>
+          <div id="order-custom-fields" class="order-source-panel">
             <p class="form-hint" data-i18n="orderCustomHint">Enter item details for a one-off or made-to-order piece.</p>
             <div class="form-grid">
               <label class="span-2"><span data-i18n="customItemName">Item name</span><input name="customItemName" /></label>
-              <label><span data-i18n="karat">Karat</span><select name="customKarat"><option value="24">24K</option><option value="22" selected>22K</option><option value="18">18K</option></select></label>
+              <label><span data-i18n="karat">Karat</span><select name="customKarat"><option value="24" selected>24K</option><option value="22">22K</option><option value="18">18K</option></select></label>
               <div class="weight-entry form-grid span-2" data-weight-prefix="custom">
                 <label class="span-2"><span data-i18n="weightUnit">Weight unit</span>
                   <select name="customWeightUnit" class="weight-unit-select">
@@ -590,6 +605,7 @@
           <div class="form-grid order-summary-fields">
             <label><span data-i18n="quantity">Quantity</span><input name="quantity" type="number" min="1" value="1" required /></label>
             <label><span data-currency-field="orderTotal">Order total</span><input id="order-total-preview" readonly tabindex="-1" /></label>
+            <p id="order-price-breakdown" class="order-price-breakdown span-2" hidden></p>
             <label class="span-2"><span data-i18n="note">Note</span><input name="note" data-i18n-placeholder="optionalNote" /></label>
           </div>
         </fieldset>
@@ -682,43 +698,51 @@
       </form>
     </dialog>
 
-    <dialog id="item-modal" class="modal">
+    <dialog id="item-modal" class="modal modal-wide">
       <form id="item-form" method="dialog">
         <header class="modal-head">
           <h2 id="modal-title" data-i18n="addItemTitle">Add item</h2>
           <button type="button" class="icon-btn" id="close-modal">×</button>
         </header>
-        <div class="form-grid">
-          <label><span data-i18n="sku">SKU</span><input name="sku" readonly tabindex="-1" data-i18n-placeholder="skuAutoGenerated" placeholder="Auto-generated" /></label>
-          <label><span data-i18n="category">Category</span>
-            <select name="category"></select>
-          </label>
-          <label class="span-2"><span data-i18n="name">Name</span><input name="name" required /></label>
-          <label><span data-i18n="karat">Karat</span><select name="karat"><option value="24">24K</option><option value="22" selected>22K</option><option value="18">18K</option></select></label>
-          <div class="weight-entry form-grid span-2" data-weight-prefix="">
-            <label class="span-2"><span data-i18n="weightUnit">Weight unit</span>
-              <select name="weightUnit" class="weight-unit-select">
-                <option value="grams" data-i18n-option="weightUnitGrams">Grams</option>
-                <option value="tola" data-i18n-option="weightUnitTola">Tola (Aana / Laal)</option>
-              </select>
+
+        <fieldset class="modal-section">
+          <legend data-i18n="itemDetails">Item details</legend>
+          <div class="form-grid">
+            <label><span data-i18n="sku">SKU</span><input name="sku" readonly tabindex="-1" data-i18n-placeholder="skuAutoGenerated" placeholder="Auto-generated" /></label>
+            <label><span data-i18n="category">Category</span>
+              <select name="category"></select>
             </label>
-            <label class="weight-panel-grams"><span data-i18n="weightGrams">Weight (grams)</span><input name="weightGrams" type="number" min="0" step="0.001" /></label>
-            <label class="weight-panel-tola" hidden><span data-i18n="weightTola">Tola</span><input name="weightTola" type="number" min="0" step="1" /></label>
-            <label class="weight-panel-aana" hidden><span data-i18n="weightAana">Aana</span><input name="weightAana" type="number" min="0" max="15" step="1" /></label>
-            <label class="weight-panel-laal" hidden><span data-i18n="weightLaal">Laal</span><input name="weightLaal" type="number" min="0" step="0.01" /></label>
-            <p class="form-hint span-2 weight-conversion-hint" hidden></p>
+            <label class="span-2"><span data-i18n="name">Name</span><input name="name" required /></label>
+            <label><span data-i18n="karat">Karat</span><select name="karat"><option value="24" selected>24K</option><option value="22">22K</option><option value="18">18K</option></select></label>
+            <div class="weight-entry form-grid span-2" data-weight-prefix="">
+              <label class="span-2"><span data-i18n="weightUnit">Weight unit</span>
+                <select name="weightUnit" class="weight-unit-select">
+                  <option value="grams" data-i18n-option="weightUnitGrams">Grams</option>
+                  <option value="tola" data-i18n-option="weightUnitTola">Tola (Aana / Laal)</option>
+                </select>
+              </label>
+              <label class="weight-panel-grams"><span data-i18n="weightGrams">Weight (grams)</span><input name="weightGrams" type="number" min="0" step="0.001" /></label>
+              <label class="weight-panel-tola" hidden><span data-i18n="weightTola">Tola</span><input name="weightTola" type="number" min="0" step="1" /></label>
+              <label class="weight-panel-aana" hidden><span data-i18n="weightAana">Aana</span><input name="weightAana" type="number" min="0" max="15" step="1" /></label>
+              <label class="weight-panel-laal" hidden><span data-i18n="weightLaal">Laal</span><input name="weightLaal" type="number" min="0" step="0.01" /></label>
+              <p class="form-hint span-2 weight-conversion-hint" hidden></p>
+            </div>
+            <label><span data-currency-field="makingCharge">Making charge</span><input name="makingCharge" type="number" min="0" step="100" value="0" /></label>
+            <label><span data-currency-field="purchaseCost">Purchase cost</span><input name="purchaseCost" type="number" min="0" step="100" /></label>
+            <label><span data-i18n="quantity">Quantity</span><input name="quantity" type="number" min="0" value="1" required /></label>
+            <label><span data-i18n="status">Status</span><select name="status"><option value="in_stock" data-i18n-option="inStock">In stock</option><option value="reserved" data-i18n-option="reserved">Reserved</option><option value="sold_out" data-i18n-option="soldOut">Sold out</option></select></label>
+            <label><span data-i18n="location">Location</span><input name="location" list="location-options" data-i18n-placeholder="locationPlaceholder" /></label>
+            <label class="check-label span-2"><input name="hallmark" type="checkbox" checked /><span data-i18n="hallmarkCertified">Hallmark certified</span></label>
+            <label><span data-currency-field="salePrice">Sale price</span><input name="salePrice" id="item-sale-price" type="number" min="0" step="0.01" data-i18n-placeholder="salePriceHint" placeholder="Leave blank to use calculated price" /></label>
+            <label><span data-i18n="calculatedPrice">Calculated price</span><input id="item-price-preview" type="text" readonly tabindex="-1" /></label>
+            <div id="item-price-breakdown" class="order-price-breakdown span-2" hidden></div>
+            <label class="span-2"><span data-i18n="notes">Notes</span><textarea name="notes" rows="2"></textarea></label>
           </div>
-          <label><span data-currency-field="makingCharge">Making charge</span><input name="makingCharge" type="number" min="0" step="100" /></label>
-          <label><span data-currency-field="purchaseCost">Purchase cost</span><input name="purchaseCost" type="number" min="0" step="100" /></label>
-          <label><span data-i18n="quantity">Quantity</span><input name="quantity" type="number" min="0" value="1" required /></label>
-          <label><span data-i18n="status">Status</span><select name="status"><option value="in_stock" data-i18n-option="inStock">In stock</option><option value="reserved" data-i18n-option="reserved">Reserved</option><option value="sold_out" data-i18n-option="soldOut">Sold out</option></select></label>
-          <label><span data-i18n="location">Location</span><input name="location" list="location-options" data-i18n-placeholder="locationPlaceholder" /></label>
-          <label class="check-label span-2"><input name="hallmark" type="checkbox" checked /><span data-i18n="hallmarkCertified">Hallmark certified</span></label>
-          <label class="span-2"><span data-i18n="notes">Notes</span><textarea name="notes" rows="2"></textarea></label>
-        </div>
+        </fieldset>
+
         <footer class="modal-foot">
           <button type="button" class="btn" id="cancel-modal" data-i18n="cancel">Cancel</button>
-          <button type="submit" class="btn btn-primary" data-i18n="saveItem">Save item</button>
+          <button type="submit" class="btn btn-gold" data-i18n="saveItem">Save item</button>
         </footer>
       </form>
     </dialog>
