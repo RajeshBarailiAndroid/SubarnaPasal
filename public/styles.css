@@ -1674,6 +1674,10 @@ th {
   opacity: 0.7;
 }
 
+.bill-sign-line-blank {
+  min-height: 48px;
+}
+
 .bill-sign-name {
   font-family: "Brush Script MT", "Segoe Script", cursive;
   font-size: 1.25rem;
@@ -2808,6 +2812,69 @@ th {
 .rate-history-title {
   margin: 1.5rem 0 0.75rem;
   font-size: 0.95rem;
+}
+
+.rate-history-chart {
+  margin-bottom: 0.5rem;
+}
+
+.rate-chart-empty {
+  margin: 0;
+  padding: 1.25rem;
+  background: var(--surface-2, #f8f6f2);
+  border-radius: var(--radius, 8px);
+  border: 1px dashed var(--border);
+}
+
+.gold-rate-chart-wrap {
+  background: var(--surface-2, #f8f6f2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 8px);
+  padding: 0.75rem 1rem 0.5rem;
+}
+
+.gold-rate-chart-svg {
+  display: block;
+  width: 100%;
+  max-width: 640px;
+  height: auto;
+}
+
+.chart-grid-line {
+  stroke: var(--border);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+
+.chart-axis-label {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
+.gold-rate-line {
+  fill: none;
+  stroke: var(--gold, #c9a227);
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.gold-rate-area {
+  fill: rgba(201, 162, 39, 0.12);
+  stroke: none;
+}
+
+.gold-rate-dot {
+  fill: var(--gold-dark, #9a7b1a);
+  stroke: #fff;
+  stroke-width: 1.5;
+}
+
+.rate-chart-caption {
+  margin: 0.5rem 0 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-align: center;
 }
 
 /* ── Expenses ── */

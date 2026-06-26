@@ -88,6 +88,7 @@ function refreshDisplayPrices() {
   populateOrderItemSelect();
   updateOrderTotalPreview();
   updateCustomItemPricePreview();
+  renderRateHistoryChart();
   renderRateHistoryTable();
   if (reportCache && activeView === 'reports') {
     const expenses = expensesInRange(reportCache.period?.start, reportCache.period?.end);
@@ -100,18 +101,118 @@ function refreshDisplayPrices() {
   }
 }
 
+function formatRateHistoryDate(row) {
+  const raw = row.date || String(row.updatedAt || '').slice(0, 10);
+  if (!raw) return '—';
+  const [y, m, d] = raw.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  return Number.isNaN(dt.getTime()) ? raw : dt.toLocaleDateString();
+}
+
+function renderRateHistoryChart() {
+  const el = document.getElementById('rate-history-chart');
+  if (!el) return;
+  const sorted = [...rateHistoryCache]
+    .map((row) => ({
+      date: row.date || String(row.updatedAt || '').slice(0, 10),
+      goldRatePerTola: row.goldRatePerTola,
+      value: nprToDisplay(row.goldRatePerTola)
+    }))
+    .filter((row) => row.date && row.value > 0)
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  if (sorted.length < 2) {
+    el.innerHTML = `<p class="empty rate-chart-empty">${t('noRateHistoryChart')}</p>`;
+    return;
+  }
+
+  const w = 640;
+  const h = 220;
+  const pad = { top: 16, right: 16, bottom: 36, left: 56 };
+  const innerW = w - pad.left - pad.right;
+  const innerH = h - pad.top - pad.bottom;
+  const values = sorted.map((r) => r.value);
+  const minV = Math.min(...values);
+  const maxV = Math.max(...values);
+  const span = maxV - minV || 1;
+  const n = sorted.length;
+
+  const points = sorted.map((row, i) => {
+    const x = pad.left + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
+    const y = pad.top + innerH - ((row.value - minV) / span) * innerH;
+    return { x, y, row };
+  });
+
+  const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+  const baseY = pad.top + innerH;
+  const areaPath = `${linePath} L${points[n - 1].x.toFixed(1)},${baseY} L${points[0].x.toFixed(1)},${baseY} Z`;
+
+  const yTicks = 4;
+  const yLabels = Array.from({ length: yTicks + 1 }, (_, i) => {
+    const v = minV + (span * i) / yTicks;
+    const y = pad.top + innerH - (i / yTicks) * innerH;
+    return `<text x="${pad.left - 8}" y="${y + 4}" class="chart-axis-label" text-anchor="end">${formatCurrencyAmount(v)}</text>
+      <line x1="${pad.left}" y1="${y}" x2="${w - pad.right}" y2="${y}" class="chart-grid-line"/>`;
+  }).join('');
+
+  const xLabelIndices = n <= 5
+    ? sorted.map((_, i) => i)
+    : [0, Math.floor((n - 1) / 2), n - 1];
+  const xLabels = xLabelIndices.map((i) => {
+    const p = points[i];
+    return `<text x="${p.x}" y="${h - 8}" class="chart-axis-label" text-anchor="middle">${formatRateHistoryDate(sorted[i])}</text>`;
+  }).join('');
+
+  const dots = points.map((p) =>
+    `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3.5" class="gold-rate-dot">
+      <title>${formatRateHistoryDate(p.row)}: ${formatCurrencyAmount(p.row.value)}/tola</title>
+    </circle>`
+  ).join('');
+
+  const latest = sorted[sorted.length - 1];
+  el.innerHTML = `
+    <div class="gold-rate-chart-wrap">
+      <svg class="gold-rate-chart-svg" viewBox="0 0 ${w} ${h}" role="img" aria-label="${t('goldRateChart')}">
+        ${yLabels}
+        <path d="${areaPath}" class="gold-rate-area"/>
+        <path d="${linePath}" class="gold-rate-line"/>
+        ${dots}
+        ${xLabels}
+      </svg>
+      <p class="rate-chart-caption">${t('latest')}: ${formatCurrencyAmount(latest.value)}/tola · ${formatRateHistoryDate(latest)}</p>
+    </div>`;
+}
+
 function renderRateHistoryTable() {
   const historyEl = document.getElementById('rate-history');
   if (!historyEl) return;
   historyEl.innerHTML = rateHistoryCache.length
     ? `<table class="data-table"><thead><tr><th>${t('date')}</th><th>${t('perTolaCol')}</th><th>${t('perGramCol')}</th></tr></thead><tbody>
       ${rateHistoryCache.map((row) => `<tr>
-        <td>${new Date(row.updatedAt).toLocaleString()}</td>
+        <td>${formatRateHistoryDate(row)}</td>
         <td>${formatMoney(row.goldRatePerTola)}</td>
         <td>${formatMoney(row.goldRatePerGram)}</td>
       </tr>`).join('')}
     </tbody></table>`
     : `<p class="empty">${t('noRateHistory')}</p>`;
+}
+
+async function persistDailyGoldRateSnapshot() {
+  if (!goldRateCache || goldRateCache <= 0) return;
+  try {
+    const payload = await api('/api/settings/daily-gold-rate', {
+      method: 'POST',
+      body: JSON.stringify({
+        goldRatePerTola: goldRateCache,
+        goldRatePerGram: Number((goldRateCache / TOLA_GRAMS).toFixed(2))
+      })
+    });
+    if (Array.isArray(payload.rateHistory)) {
+      rateHistoryCache = payload.rateHistory;
+      renderRateHistoryChart();
+      renderRateHistoryTable();
+    }
+  } catch (_) { /* optional background save */ }
 }
 
 async function refreshAfterCurrencyChange(prevCurrency) {
@@ -1523,6 +1624,7 @@ async function updateMetalRates(settings) {
         silverEl.textContent =
           `Silver: ${formatCurrencyAmount(live.silver.perTola)}/tola · ${formatCurrencyAmount(live.silver.perGram)}/g`;
       }
+      await persistDailyGoldRateSnapshot();
     } catch (err) {
       if (bodyEl) {
         bodyEl.hidden = false;
@@ -1857,6 +1959,7 @@ async function loadSettings() {
     || (settings.silverRatePerGram
       ? Number((settings.silverRatePerGram * TOLA_GRAMS).toFixed(2))
       : 0);
+  rateHistoryCache = settings.rateHistory || [];
   refreshMetalPriceFields();
   await updateMetalRates(settings);
 
@@ -1875,7 +1978,7 @@ async function loadSettings() {
     ? `${t('lastSaved')} ${new Date(settings.updatedAt).toLocaleString()}`
     : '';
 
-  rateHistoryCache = settings.rateHistory || [];
+  renderRateHistoryChart();
   renderRateHistoryTable();
   updateShopBranding();
 }
@@ -3027,12 +3130,9 @@ function billSignaturesBlock(sale, options) {
   if (!options.showSign && !options.showCustomerSign) return '';
   const blocks = [];
   if (options.showCustomerSign) {
-    const customerName = sale.customer || '—';
     blocks.push(`
       <div class="bill-sign-block bill-sign-block-customer">
-        <div class="bill-sign-line">
-          <span class="bill-sign-name">${customerName}</span>
-        </div>
+        <div class="bill-sign-line bill-sign-line-blank" aria-hidden="true"></div>
         <span class="bill-sign-label">${t('customerSignature')}</span>
       </div>`);
   }
@@ -3850,10 +3950,15 @@ document.getElementById('settings-form')?.addEventListener('submit', async (e) =
     const silverRatePerTola = parseTolaRateInput(fd.get('silverRatePerTola'))
       || parseTolaFromGramInput(fd.get('silverRatePerGram') || 0);
     const priceMode = fd.get('priceMode');
-    await api('/api/settings', {
+    const saved = await api('/api/settings', {
       method: 'PATCH',
       body: JSON.stringify({ goldRatePerTola, silverRatePerTola, priceMode })
     });
+    if (Array.isArray(saved.rateHistory)) {
+      rateHistoryCache = saved.rateHistory;
+      renderRateHistoryChart();
+      renderRateHistoryTable();
+    }
     settingsPriceMode = priceMode === 'api' ? 'api' : 'manual';
     settingsCache.priceMode = settingsPriceMode;
     goldRateCache = goldRatePerTola;

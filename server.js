@@ -171,6 +171,49 @@ function gramsToTola(grams) {
   return Number((grams / TOLA_GRAMS).toFixed(3));
 }
 
+function normalizeRateHistoryEntry(entry) {
+  const updatedAt = entry.updatedAt || new Date().toISOString();
+  const goldRatePerTola = Number(entry.goldRatePerTola) || 0;
+  return {
+    date: entry.date || String(updatedAt).slice(0, 10),
+    goldRatePerTola,
+    goldRatePerGram: Number(entry.goldRatePerGram)
+      || Number((goldRatePerTola / TOLA_GRAMS).toFixed(2)),
+    updatedAt
+  };
+}
+
+function recordDailyGoldRateSnapshot(store, goldRatePerTola, goldRatePerGram) {
+  const tola = Number(goldRatePerTola);
+  if (!Number.isFinite(tola) || tola <= 0) return false;
+
+  const now = new Date().toISOString();
+  const today = now.slice(0, 10);
+  const gram = Number(goldRatePerGram) || Number((tola / TOLA_GRAMS).toFixed(2));
+  if (!Array.isArray(store.settings.rateHistory)) store.settings.rateHistory = [];
+
+  const history = store.settings.rateHistory.map(normalizeRateHistoryEntry);
+  const idx = history.findIndex((row) => row.date === today);
+  const entry = {
+    date: today,
+    goldRatePerTola: tola,
+    goldRatePerGram: gram,
+    updatedAt: now
+  };
+
+  if (idx >= 0) {
+    const prev = history[idx];
+    if (prev.goldRatePerTola === tola && prev.goldRatePerGram === gram) return false;
+    history[idx] = entry;
+  } else {
+    history.push(entry);
+  }
+
+  history.sort((a, b) => b.date.localeCompare(a.date));
+  store.settings.rateHistory = history.slice(0, 90);
+  return true;
+}
+
 function itemValue(item, goldRatePerTola) {
   const goldValue = gramsToTola(item.weightGrams) * goldRatePerTola * (item.karat / 24);
   return Math.round(goldValue + (item.makingCharge || 0));
@@ -822,13 +865,34 @@ app.get('/api/summary', asyncRoute(async (req, res) => {
 app.get('/api/settings', asyncRoute(async (req, res) => {
   const store = await readStore(req.userId);
   const settings = normalizeSilverRates({ ...store.settings });
+  if (settings.goldRatePerTola > 0) {
+    const changed = recordDailyGoldRateSnapshot(
+      store,
+      settings.goldRatePerTola,
+      settings.goldRatePerGram
+    );
+    if (changed) await writeStore(store, req.userId);
+  }
   res.json({
     ...settings,
     locations: getStoreLocations(store),
     itemCategories: getStoreItemCategories(store),
     goldRatePerGram: Number((settings.goldRatePerTola / TOLA_GRAMS).toFixed(2)),
-    rateHistory: settings.rateHistory || []
+    rateHistory: store.settings.rateHistory || []
   });
+}));
+
+app.post('/api/settings/daily-gold-rate', asyncRoute(async (req, res) => {
+  const store = await readStore(req.userId);
+  const tola = Number(req.body.goldRatePerTola ?? store.settings.goldRatePerTola);
+  const gram = Number(req.body.goldRatePerGram)
+    || Number((tola / TOLA_GRAMS).toFixed(2));
+  if (!Number.isFinite(tola) || tola < 0) {
+    return res.status(400).json({ error: 'Gold rate must be a valid number.' });
+  }
+  recordDailyGoldRateSnapshot(store, tola, gram);
+  await writeStore(store, req.userId);
+  res.json({ rateHistory: store.settings.rateHistory || [] });
 }));
 
 app.get('/api/settings/shop-name-available', asyncRoute(async (req, res) => {
@@ -847,16 +911,12 @@ app.patch('/api/settings', asyncRoute(async (req, res) => {
     if (!Number.isFinite(newRate) || newRate < 0) {
       return res.status(400).json({ error: 'Gold rate must be a valid number.' });
     }
-    if (newRate !== store.settings.goldRatePerTola) {
-      if (!Array.isArray(store.settings.rateHistory)) store.settings.rateHistory = [];
-      store.settings.rateHistory.unshift({
-        goldRatePerTola: newRate,
-        goldRatePerGram: Number((newRate / TOLA_GRAMS).toFixed(2)),
-        updatedAt: now
-      });
-      store.settings.rateHistory = store.settings.rateHistory.slice(0, 30);
-    }
     store.settings.goldRatePerTola = newRate;
+    recordDailyGoldRateSnapshot(
+      store,
+      newRate,
+      Number((newRate / TOLA_GRAMS).toFixed(2))
+    );
   }
 
   if (req.body.shopName != null) {
@@ -919,7 +979,8 @@ app.patch('/api/settings', asyncRoute(async (req, res) => {
   res.json({
     ...store.settings,
     locations: getStoreLocations(store),
-    itemCategories: getStoreItemCategories(store)
+    itemCategories: getStoreItemCategories(store),
+    rateHistory: store.settings.rateHistory || []
   });
 }));
 
