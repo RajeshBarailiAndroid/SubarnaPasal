@@ -36,7 +36,7 @@ const {
   displayNameFromUser,
   lookupDisplayNameFromDb
 } = require('./lib/auth');
-const { getLiveMetalRates, isMetalApiConfigured, normalizeMetalCurrency } = require('./lib/metal-rates');
+const { getLiveMetalRates, isMetalApiConfigured, getProvider, normalizeMetalCurrency } = require('./lib/metal-rates');
 const { captureSharedGoldRateIfChanged, recordSharedApiGoldReading, displayToNpr, localDateStr } = require('./lib/capture-shared-gold-rate');
 
 const CRON_CAPTURE_PATH = '/api/cron/capture-gold-rate';
@@ -506,10 +506,29 @@ async function buildReports(store, start, end) {
 
 app.get('/api/health', asyncRoute(async (req, res) => {
   const database = await checkSupabaseConnection();
+  const metalRates = {
+    configured: isMetalApiConfigured(),
+    provider: getProvider()
+  };
+  if (metalRates.configured) {
+    try {
+      const live = await getLiveMetalRates('USD');
+      metalRates.ok = true;
+      metalRates.source = live.source;
+      metalRates.updatedAt = live.updatedAt;
+    } catch (err) {
+      metalRates.ok = false;
+      metalRates.error = err.message;
+    }
+  } else {
+    metalRates.ok = false;
+    metalRates.error = 'METAL_PRICE_PROVIDER not configured';
+  }
   res.json({
-    ok: database.ok || !database.valid,
+    ok: (database.ok || !database.valid) && metalRates.ok !== false,
     dataSource: dataSourceLabel(),
-    database
+    database,
+    metalRates
   });
 }));
 
@@ -903,12 +922,12 @@ app.get('/api/metal-rates', asyncRoute(async (req, res) => {
     const gramNpr = displayToNpr(rates.gold.perGram, currency)
       || Number((tolaNpr / TOLA_GRAMS).toFixed(2));
     if (tolaNpr > 0) {
-      await appendSharedHistory({
+      appendSharedHistory({
         goldRatePerTola: tolaNpr,
         goldRatePerGram: gramNpr,
         priceMode: 'api',
         localDate: localDateStr()
-      });
+      }).catch((err) => console.warn('metal-rates history save:', err.message));
     }
     res.json(rates);
   } catch (err) {

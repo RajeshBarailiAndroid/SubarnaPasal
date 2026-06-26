@@ -730,7 +730,7 @@ function updateMetalRateHeaderFromLive(live) {
 }
 
 async function captureLiveDailyRate() {
-  const mode = isLiveDailyApiMode() ? 'api' : (settingsPriceMode === 'api' ? 'api' : 'manual');
+  const mode = effectivePriceMode() === 'api' ? 'api' : 'manual';
   let tolaNpr = goldRateCache;
   let gramNpr = Number((tolaNpr / TOLA_GRAMS).toFixed(2));
 
@@ -948,6 +948,75 @@ function currentRateHistoryPriceMode() {
   return settingsPriceMode === 'api' ? 'api' : 'manual';
 }
 
+function effectivePriceMode() {
+  return currentRateHistoryPriceMode();
+}
+
+function readManualRatesFromForm() {
+  const priceForm = document.getElementById('settings-form');
+  if (!priceForm) {
+    return {
+      goldRatePerTola: goldRateCache,
+      goldRatePerGram: Number((goldRateCache / TOLA_GRAMS).toFixed(2)),
+      silverRatePerTola: silverRateCache,
+      silverRatePerGram: Number((silverRateCache / TOLA_GRAMS).toFixed(2))
+    };
+  }
+  const goldRatePerTola = parseTolaRateInput(priceForm.goldRatePerTola?.value)
+    || parseTolaFromGramInput(priceForm.goldRatePerGram?.value)
+    || goldRateCache;
+  const silverRatePerTola = parseTolaRateInput(priceForm.silverRatePerTola?.value)
+    || parseTolaFromGramInput(priceForm.silverRatePerGram?.value)
+    || silverRateCache;
+  return {
+    goldRatePerTola,
+    goldRatePerGram: Number((goldRatePerTola / TOLA_GRAMS).toFixed(2)),
+    silverRatePerTola,
+    silverRatePerGram: Number((silverRatePerTola / TOLA_GRAMS).toFixed(2))
+  };
+}
+
+function resolveManualMetalRates(settings = null) {
+  const fromForm = readManualRatesFromForm();
+  const goldRatePerTola = Number(settings?.goldRatePerTola ?? fromForm.goldRatePerTola) || 0;
+  const silverRatePerTola = Number(settings?.silverRatePerTola ?? fromForm.silverRatePerTola) || 0;
+  return {
+    goldRatePerTola,
+    goldRatePerGram: Number(settings?.goldRatePerGram)
+      ?? Number((goldRatePerTola / TOLA_GRAMS).toFixed(2)),
+    silverRatePerTola,
+    silverRatePerGram: Number(settings?.silverRatePerGram)
+      ?? Number((silverRatePerTola / TOLA_GRAMS).toFixed(2))
+  };
+}
+
+function applyManualRatesToApp(metal) {
+  goldRateCache = metal.goldRatePerTola;
+  silverRateCache = metal.silverRatePerTola;
+  const goldEl = document.getElementById('metal-rate-gold');
+  const silverEl = document.getElementById('metal-rate-silver');
+  const bodyEl = document.getElementById('metal-rates-body');
+  if (bodyEl) bodyEl.hidden = true;
+  if (goldEl) {
+    goldEl.hidden = false;
+    goldEl.textContent =
+      `Gold: ${formatMoney(metal.goldRatePerTola)}/tola · ${formatMoney(metal.goldRatePerGram)}/g`;
+  }
+  if (silverEl) {
+    silverEl.hidden = false;
+    silverEl.textContent =
+      `Silver: ${formatMoney(metal.silverRatePerTola)}/tola · ${formatMoney(metal.silverRatePerGram)}/g`;
+  }
+}
+
+function syncManualRatesFromForm() {
+  if (effectivePriceMode() !== 'manual') return;
+  applyManualRatesToApp(readManualRatesFromForm());
+  updateGoldCalculator();
+  updateOrderTotalPreview();
+  refreshDisplayPrices();
+}
+
 function rateHistoryForDisplay() {
   const mode = currentRateHistoryPriceMode();
   return rateHistoryCache
@@ -1117,7 +1186,7 @@ function hasTodayRateReading(priceMode) {
 }
 
 async function ensureTodayGoldRateInDatabase() {
-  const mode = settingsPriceMode === 'api' ? 'api' : 'manual';
+  const mode = effectivePriceMode() === 'api' ? 'api' : 'manual';
   if (goldRateCache <= 0 || hasTodayRateReading(mode)) return;
   await persistDailyGoldRateSnapshot(mode);
 }
@@ -1152,17 +1221,13 @@ async function seedTodayRateReading() {
 
 async function refreshAfterCurrencyChange(prevCurrency) {
   refreshCurrencyLabels();
-  if (settingsPriceMode === 'api') {
+  if (effectivePriceMode() === 'api') {
     await updateMetalRates({ priceMode: 'api' });
   } else {
-    await updateMetalRates({
-      priceMode: 'manual',
-      goldRatePerTola: goldRateCache,
-      goldRatePerGram: Number((goldRateCache / TOLA_GRAMS).toFixed(2)),
-      silverRatePerTola: silverRateCache,
-      silverRatePerGram: Number((silverRateCache / TOLA_GRAMS).toFixed(2))
-    });
+    const metal = resolveManualMetalRates(settingsCache);
+    applyManualRatesToApp(metal);
     refreshMetalPriceFields();
+    await updateMetalRates({ priceMode: 'manual', ...metal });
   }
   if (prevCurrency && prevCurrency !== displayCurrency) {
     refreshGoldCalcForCurrency(prevCurrency);
@@ -1221,6 +1286,7 @@ function syncSettingsGoldRateFromGram() {
   const tolaNpr = parseTolaFromGramInput(gramInput.value);
   tolaInput.value = formatTolaRateInput(tolaNpr);
   metalRateSyncLock = false;
+  syncManualRatesFromForm();
 }
 
 function syncSettingsGoldRateFromTola() {
@@ -1232,6 +1298,7 @@ function syncSettingsGoldRateFromTola() {
   const tolaNpr = parseTolaRateInput(tolaInput.value);
   gramInput.value = formatGramRateFromTola(tolaNpr);
   metalRateSyncLock = false;
+  syncManualRatesFromForm();
 }
 
 function syncSettingsSilverRateFromGram() {
@@ -1243,6 +1310,7 @@ function syncSettingsSilverRateFromGram() {
   const tolaNpr = parseTolaFromGramInput(gramInput.value);
   tolaInput.value = formatTolaRateInput(tolaNpr);
   metalRateSyncLock = false;
+  syncManualRatesFromForm();
 }
 
 function syncSettingsSilverRateFromTola() {
@@ -1254,30 +1322,37 @@ function syncSettingsSilverRateFromTola() {
   const tolaNpr = parseTolaRateInput(tolaInput.value);
   gramInput.value = formatGramRateFromTola(tolaNpr);
   metalRateSyncLock = false;
+  syncManualRatesFromForm();
 }
 
 function refreshMetalPriceFields() {
   const priceForm = document.getElementById('settings-form');
   if (!priceForm) return;
+  const metal = effectivePriceMode() === 'manual'
+    ? readManualRatesFromForm()
+    : {
+      goldRatePerTola: goldRateCache,
+      silverRatePerTola: silverRateCache
+    };
   const goldGramField = priceForm.goldRatePerGram;
   const goldTolaField = priceForm.goldRatePerTola;
   const silverGramField = priceForm.silverRatePerGram;
   const silverTolaField = priceForm.silverRatePerTola;
   const rateStep = currencyCode() === 'NPR' ? '1' : '0.01';
   if (goldGramField) {
-    goldGramField.value = formatGramRateFromTola(goldRateCache);
+    goldGramField.value = formatGramRateFromTola(metal.goldRatePerTola);
     goldGramField.step = rateStep;
   }
   if (goldTolaField) {
-    goldTolaField.value = formatTolaRateInput(goldRateCache);
+    goldTolaField.value = formatTolaRateInput(metal.goldRatePerTola);
     goldTolaField.step = rateStep;
   }
   if (silverGramField) {
-    silverGramField.value = formatGramRateFromTola(silverRateCache);
+    silverGramField.value = formatGramRateFromTola(metal.silverRatePerTola);
     silverGramField.step = '0.01';
   }
   if (silverTolaField) {
-    silverTolaField.value = formatTolaRateInput(silverRateCache);
+    silverTolaField.value = formatTolaRateInput(metal.silverRatePerTola);
     silverTolaField.step = rateStep;
   }
   refreshCurrencyLabels();
@@ -2476,7 +2551,11 @@ function formatCurrencyAmount(amount) {
 }
 
 function applyMetalRatesFromResponse(payload) {
-  if (settingsPriceMode === 'api' && payload.metalRatesLive) {
+  if (effectivePriceMode() === 'manual') {
+    applyManualRatesToApp(resolveManualMetalRates());
+    return;
+  }
+  if (payload.metalRatesLive) {
     if (payload.goldRatePerTola != null) goldRateCache = displayToNpr(payload.goldRatePerTola);
     if (payload.silverRatePerTola != null) silverRateCache = displayToNpr(payload.silverRatePerTola);
     return;
@@ -2541,16 +2620,13 @@ function orderActionButtons(order) {
   return actions.join('');
 }
 
-async function updateMetalRates(settings) {
+async function updateMetalRates(settings = {}) {
   const goldEl = document.getElementById('metal-rate-gold');
   const silverEl = document.getElementById('metal-rate-silver');
   const bodyEl = document.getElementById('metal-rates-body');
   const rateEdit = document.querySelector('.rate-edit');
-  const priceMode = settings.priceMode || 'manual';
+  const priceMode = settings.priceMode || effectivePriceMode();
   settingsPriceMode = priceMode;
-  const goldPerGram = settings.goldRatePerGram ?? Number((settings.goldRatePerTola / TOLA_GRAMS).toFixed(2));
-  const silverPerTola = settings.silverRatePerTola ?? silverRateCache ?? 0;
-  const silverPerGram = settings.silverRatePerGram ?? Number((silverPerTola / TOLA_GRAMS).toFixed(2));
 
   if (priceMode === 'api') {
     try {
@@ -2576,12 +2652,25 @@ async function updateMetalRates(settings) {
         });
       }
     } catch (err) {
+      const message = err.message || t('metalApiWarning');
       if (bodyEl) {
         bodyEl.hidden = false;
-        bodyEl.innerHTML = `<span class="metal-rates-warning">${err.message}</span>`;
+        bodyEl.innerHTML = `<span class="metal-rates-warning">${message}</span>`;
       }
-      if (goldEl) goldEl.hidden = true;
-      if (silverEl) silverEl.hidden = true;
+      if (goldRateCache > 0 && goldEl) {
+        goldEl.hidden = false;
+        goldEl.textContent =
+          `Gold: ${formatMoney(goldRateCache)}/tola · ${formatMoney(Number((goldRateCache / TOLA_GRAMS).toFixed(2)))}/g`;
+      } else if (goldEl) {
+        goldEl.hidden = true;
+      }
+      if (silverRateCache > 0 && silverEl) {
+        silverEl.hidden = false;
+        silverEl.textContent =
+          `Silver: ${formatMoney(silverRateCache)}/tola · ${formatMoney(Number((silverRateCache / TOLA_GRAMS).toFixed(2)))}/g`;
+      } else if (silverEl) {
+        silverEl.hidden = true;
+      }
     }
     if (rateEdit) rateEdit.hidden = false;
     refreshMetalPriceFields();
@@ -2591,16 +2680,8 @@ async function updateMetalRates(settings) {
   }
 
   if (bodyEl) bodyEl.hidden = true;
-  if (goldEl) {
-    goldEl.hidden = false;
-    goldEl.textContent =
-      `Gold: ${formatMoney(settings.goldRatePerTola)}/tola · ${formatMoney(goldPerGram)}/g`;
-  }
-  if (silverEl) {
-    silverEl.hidden = false;
-    silverEl.textContent =
-      `Silver: ${formatMoney(silverPerTola)}/tola · ${formatMoney(silverPerGram)}/g`;
-  }
+  const metal = resolveManualMetalRates(settings);
+  applyManualRatesToApp(metal);
   if (rateEdit) rateEdit.hidden = false;
   refreshMetalPriceFields();
   updateGoldCalculator();
@@ -2909,6 +2990,8 @@ async function loadSettings() {
     || (settings.silverRatePerGram
       ? Number((settings.silverRatePerGram * TOLA_GRAMS).toFixed(2))
       : 0);
+  settingsCache.goldRatePerTola = goldRateCache;
+  settingsCache.silverRatePerTola = silverRateCache;
   rateHistoryCache = (settings.rateHistory || []).map(normalizeRateHistoryRow);
   await loadSharedGoldRates();
   refreshMetalPriceFields();
@@ -4916,13 +4999,20 @@ document.getElementById('settings-form')?.addEventListener('submit', async (e) =
     }
     settingsPriceMode = priceMode === 'api' ? 'api' : 'manual';
     settingsCache.priceMode = settingsPriceMode;
+    settingsCache.goldRatePerTola = goldRatePerTola;
+    settingsCache.silverRatePerTola = silverRatePerTola;
     goldRateCache = goldRatePerTola;
     silverRateCache = silverRatePerTola;
     if (settingsPriceMode === 'api') {
       await updateMetalRates({ priceMode: 'api' });
     } else {
-      refreshMetalPriceFields();
-      updateGoldCalculator();
+      const metal = resolveManualMetalRates({
+        goldRatePerTola,
+        goldRatePerGram: Number((goldRatePerTola / TOLA_GRAMS).toFixed(2)),
+        silverRatePerTola,
+        silverRatePerGram: Number((silverRatePerTola / TOLA_GRAMS).toFixed(2))
+      });
+      await updateMetalRates({ priceMode: 'manual', ...metal });
     }
     syncMetalRatePolling();
     refreshDisplayPrices();
@@ -4959,11 +5049,21 @@ document.querySelectorAll('.rate-history-period [data-rate-period]').forEach((bt
   });
 });
 document.querySelectorAll('#settings-form [name="priceMode"]').forEach((radio) => {
-  radio.addEventListener('change', () => {
+  radio.addEventListener('change', async () => {
+    settingsPriceMode = effectivePriceMode();
+    stopMetalRatePolling();
     if (!isLiveDailyApiMode()) {
       liveDailyCurrentTick = null;
       resetLiveDailySecondSeries();
       liveDailyFlatAnchor = null;
+    }
+    if (settingsPriceMode === 'manual') {
+      const metal = resolveManualMetalRates(settingsCache);
+      applyManualRatesToApp(metal);
+      refreshMetalPriceFields();
+      await updateMetalRates({ priceMode: 'manual', ...metal });
+    } else {
+      await updateMetalRates({ priceMode: 'api', ...settingsCache });
     }
     loadSharedGoldRates().then(() => {
       renderRateHistoryChart();
