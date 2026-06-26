@@ -1,4 +1,7 @@
-const TOLA_GRAMS = 11.664;
+const TOLA_GRAMS = 11.66;
+const AANA_PER_TOLA = 16;
+const LAAL_PER_AANA = 6.25;
+const LAAL_PER_TOLA = AANA_PER_TOLA * LAAL_PER_AANA;
 const fmt = new Intl.NumberFormat('en-NP');
 
 const CURRENCIES = {
@@ -23,6 +26,11 @@ function nprToDisplay(npr) {
 
 function displayToNpr(amount) {
   return Number(amount) * getCurrency().nprPerUnit;
+}
+
+function displayToNprAt(amount, currency) {
+  const c = CURRENCIES[currency] || CURRENCIES.USD;
+  return Number(amount) * c.nprPerUnit;
 }
 
 function inputMoneyToNpr(amount) {
@@ -106,7 +114,7 @@ function renderRateHistoryTable() {
     : `<p class="empty">${t('noRateHistory')}</p>`;
 }
 
-async function refreshAfterCurrencyChange() {
+async function refreshAfterCurrencyChange(prevCurrency) {
   refreshCurrencyLabels();
   if (settingsPriceMode === 'api') {
     await updateMetalRates({ priceMode: 'api' });
@@ -120,6 +128,11 @@ async function refreshAfterCurrencyChange() {
     });
     refreshMetalPriceFields();
   }
+  if (prevCurrency && prevCurrency !== displayCurrency) {
+    refreshGoldCalcForCurrency(prevCurrency);
+  }
+  updateGoldCalcRateLabel();
+  updateGoldCalculator();
   refreshDisplayPrices();
   if (activeView === 'reports') {
     await loadReports().catch((err) => toast(err.message));
@@ -254,6 +267,7 @@ const views = {
   customers: { showAddItem: false, posMode: false },
   reports: { showAddItem: false, posMode: false },
   expenses: { showAddItem: false, posMode: false },
+  calculator: { showAddItem: false, posMode: false },
   settings: { showAddItem: false, posMode: false }
 };
 
@@ -264,8 +278,10 @@ let orderItemsCache = [];
 let posItemsCache = [];
 let goldRateCache = 0;
 let silverRateCache = 0;
+const calcRateDraftNpr = { gold: null, silver: null };
 let settingsPriceMode = 'manual';
 let locationsCache = [];
+let itemCategoriesCache = [...DEFAULT_ITEM_CATEGORIES];
 let settingsCache = {
   shopName: 'Suvarnapasal',
   shopAddress: '',
@@ -388,6 +404,706 @@ function orderItemsSummary(order) {
 
 function gramsToTola(g) {
   return (g / TOLA_GRAMS).toFixed(3);
+}
+
+function truncateWeight(value, decimals = 4) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  const factor = 10 ** decimals;
+  return Math.floor(n * factor + 1e-10) / factor;
+}
+
+function normalizeWeight(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n * 1e6) / 1e6;
+}
+
+function formatWeightQty(value, decimals = 4) {
+  const t = truncateWeight(value, decimals);
+  if (Number.isInteger(t)) return String(t);
+  const fixed = t.toFixed(decimals);
+  return fixed.replace(/(\.\d*?[1-9])0+$/u, '$1').replace(/\.0+$/u, '');
+}
+
+function weightFieldNames(prefix = '') {
+  if (!prefix) {
+    return {
+      prefix,
+      unitName: 'weightUnit',
+      gramsName: 'weightGrams',
+      tolaName: 'weightTola',
+      aanaName: 'weightAana',
+      laalName: 'weightLaal'
+    };
+  }
+  return {
+    prefix,
+    unitName: `${prefix}WeightUnit`,
+    gramsName: `${prefix}WeightGrams`,
+    tolaName: `${prefix}WeightTola`,
+    aanaName: `${prefix}WeightAana`,
+    laalName: `${prefix}WeightLaal`
+  };
+}
+
+function tolaPartsToGrams(tola = 0, aana = 0, laal = 0) {
+  const t = Number(tola) || 0;
+  const a = Number(aana) || 0;
+  const l = Number(laal) || 0;
+  if (t <= 0 && a <= 0 && l <= 0) return 0;
+  const totalLaal = t * LAAL_PER_TOLA + a * LAAL_PER_AANA + l;
+  return (totalLaal * TOLA_GRAMS) / LAAL_PER_TOLA;
+}
+
+function totalLaalToTolaParts(totalLaal) {
+  const tl = Math.max(0, Math.floor(totalLaal));
+  const tola = Math.floor(tl / LAAL_PER_TOLA);
+  const remLaal = tl - tola * LAAL_PER_TOLA;
+  const aana = Math.floor(remLaal / LAAL_PER_AANA);
+  const laal = remLaal - aana * LAAL_PER_AANA;
+  return { tola, aana, laal };
+}
+
+function laalPartToAanaLaal(remainderLaal) {
+  const aana = Math.floor(remainderLaal / LAAL_PER_AANA);
+  const laal = remainderLaal - aana * LAAL_PER_AANA;
+  return { aana, laal };
+}
+
+const LAAL_SNAP_GRAMS = 0.015;
+const TOLA_CENTIGRAMS = 1166;
+
+function gramsToCentigrams(grams) {
+  return Math.round(normalizeWeight(grams) * 100);
+}
+
+function centigramsToGrams(cg) {
+  return normalizeWeight(cg / 100);
+}
+
+function formatLaalQty(value) {
+  return formatWeightQty(value, 2);
+}
+
+function remainderCgToLaal(remainderCg) {
+  const numer = remainderCg * LAAL_PER_TOLA;
+  const denom = TOLA_GRAMS * 100;
+  return Math.floor((numer / denom) * 10000 + 1e-9) / 10000;
+}
+
+function gramsToTolaParts(grams) {
+  const g = normalizeWeight(grams);
+  if (!Number.isFinite(g) || g <= 0) {
+    return { tola: '', aana: '', laal: '', remainderGrams: 0, remainderLaal: 0 };
+  }
+  const totalLaalFloat = (g * LAAL_PER_TOLA) / TOLA_GRAMS;
+  const totalLaalRounded = Math.round(totalLaalFloat);
+  const gramsFromLaal = (totalLaalRounded * TOLA_GRAMS) / LAAL_PER_TOLA;
+  if (Math.abs(g - gramsFromLaal) < LAAL_SNAP_GRAMS) {
+    return { ...totalLaalToTolaParts(totalLaalRounded), remainderGrams: 0, remainderLaal: 0 };
+  }
+  const cg = gramsToCentigrams(g);
+  const tola = Math.floor(cg / TOLA_CENTIGRAMS);
+  const remainderCg = cg - tola * TOLA_CENTIGRAMS;
+  if (remainderCg <= 0) {
+    return { tola, aana: 0, laal: 0, remainderGrams: 0, remainderLaal: 0 };
+  }
+  const remainderLaal = remainderCgToLaal(remainderCg);
+  const { aana, laal } = laalPartToAanaLaal(remainderLaal);
+  const remainderGrams = centigramsToGrams(remainderCg);
+  return { tola, aana, laal, remainderGrams, remainderLaal };
+}
+
+function buildWeightFormStub(root, prefix = '') {
+  const names = weightFieldNames(prefix);
+  const stub = {
+    querySelector: (sel) => root.querySelector(sel),
+    elements: {}
+  };
+  Object.values(names).forEach((name) => {
+    if (name) stub.elements[name] = root.querySelector(`[name="${name}"]`);
+  });
+  return stub;
+}
+
+function formatWeightFromForm(form, prefix = '') {
+  const grams = getWeightGramsFromForm(form, prefix);
+  if (grams <= 0) return '—';
+  const gramsDisplay = formatWeightQty(grams, 4);
+  if (getWeightUnit(form, prefix) === 'tola') {
+    const names = weightFieldNames(prefix);
+    const tola = form.elements[names.tolaName]?.value ?? '';
+    const aana = form.elements[names.aanaName]?.value ?? '';
+    const laal = form.elements[names.laalName]?.value ?? '';
+    if (!Number(tola) && !Number(aana) && !Number(laal)) return '—';
+    const tolaText = tola === '' ? '0' : tola;
+    const aanaText = aana === '' ? '0' : aana;
+    const laalText = laal === '' ? '0' : laal;
+    return `${tolaText} ${t('weightTolaShort')} · ${aanaText} ${t('weightAanaShort')} · ${laalText} ${t('weightLaalShort')} = ${gramsDisplay} g`;
+  }
+  return formatWeightParts(grams);
+}
+
+function formatWeightParts(grams) {
+  const g = Number(grams);
+  if (!Number.isFinite(g) || g <= 0) return '—';
+  const parts = gramsToTolaParts(g);
+  const bits = [`${formatWeightQty(g, 3)} g`];
+  if (parts.tola !== '' || parts.aana !== '' || parts.laal !== '') {
+    bits.push(`${parts.tola || 0} ${t('weightTolaShort')} · ${parts.aana || 0} ${t('weightAanaShort')} · ${formatWeightQty(parts.laal, 4)} ${t('weightLaalShort')}`);
+  }
+  return bits.join(' · ');
+}
+
+function getWeightEntryEl(form, prefix = '') {
+  if (!form) return null;
+  return form.querySelector(`.weight-entry[data-weight-prefix="${prefix}"]`)
+    || form.querySelector('.weight-entry');
+}
+
+function getWeightUnit(form, prefix = '') {
+  const entry = getWeightEntryEl(form, prefix);
+  const names = weightFieldNames(prefix);
+  const unitEl = entry?.querySelector(`[name="${names.unitName}"]`) || form?.elements[names.unitName];
+  return unitEl?.value === 'tola' ? 'tola' : 'grams';
+}
+
+function getWeightGramsFromForm(form, prefix = '') {
+  if (!form) return 0;
+  const names = weightFieldNames(prefix);
+  if (getWeightUnit(form, prefix) === 'tola') {
+    return tolaPartsToGrams(
+      form.elements[names.tolaName]?.value,
+      form.elements[names.aanaName]?.value,
+      form.elements[names.laalName]?.value
+    );
+  }
+  return Number(form.elements[names.gramsName]?.value) || 0;
+}
+
+function updateWeightEntryHint(entry) {
+  if (!entry) return;
+  const hint = entry.querySelector('.weight-conversion-hint');
+  if (!hint) return;
+  const prefix = entry.dataset.weightPrefix || '';
+  const form = entry.closest('form') || buildWeightFormStub(entry.closest('#view-calculator') || entry, prefix);
+  const grams = getWeightGramsFromForm(form, prefix);
+  if (grams > 0) {
+    hint.hidden = false;
+    hint.textContent = formatWeightFromForm(form, prefix);
+  } else {
+    hint.hidden = true;
+    hint.textContent = '';
+  }
+}
+
+function setWeightEntryPanels(entry, unit) {
+  if (!entry) return;
+  const isTola = unit === 'tola';
+  entry.dataset.weightMode = isTola ? 'tola' : 'grams';
+  entry.querySelectorAll('.weight-panel-grams').forEach((el) => el.toggleAttribute('hidden', isTola));
+  entry.querySelectorAll('.weight-panel-tola').forEach((el) => el.toggleAttribute('hidden', !isTola));
+  entry.querySelectorAll('.weight-panel-aana').forEach((el) => el.toggleAttribute('hidden', !isTola));
+  entry.querySelectorAll('.weight-panel-laal').forEach((el) => el.toggleAttribute('hidden', !isTola));
+}
+
+function setWeightFieldsFromGrams(form, grams, prefix = '') {
+  if (!form) return;
+  const entry = getWeightEntryEl(form, prefix);
+  if (!entry) return;
+  const names = weightFieldNames(prefix);
+  const g = Number(grams);
+  const unitEl = form.elements[names.unitName];
+  const gramsEl = form.elements[names.gramsName];
+  const tolaEl = form.elements[names.tolaName];
+  const aanaEl = form.elements[names.aanaName];
+  const laalEl = form.elements[names.laalName];
+  if (!Number.isFinite(g) || g <= 0) {
+    if (gramsEl) gramsEl.value = '';
+    if (tolaEl) tolaEl.value = '';
+    if (aanaEl) aanaEl.value = '';
+    if (laalEl) laalEl.value = '';
+    updateWeightEntryHint(entry);
+    return;
+  }
+  const parts = gramsToTolaParts(g);
+  if (gramsEl) gramsEl.value = g;
+  if (tolaEl) tolaEl.value = parts.tola;
+  if (aanaEl) aanaEl.value = parts.aana;
+  if (laalEl) laalEl.value = formatWeightQty(parts.laal, 4);
+  if (unitEl) unitEl.value = 'grams';
+  setWeightEntryPanels(entry, 'grams');
+  updateWeightEntryHint(entry);
+}
+
+function initWeightEntry(entry) {
+  if (!entry || entry.dataset.weightBound) return;
+  entry.dataset.weightBound = '1';
+  const form = entry.closest('form');
+  const prefix = entry.dataset.weightPrefix || '';
+  const names = weightFieldNames(prefix);
+  const unitEl = entry.querySelector(`[name="${names.unitName}"]`) || form?.elements[names.unitName];
+  if (unitEl) {
+    unitEl.addEventListener('change', () => {
+      const isTola = unitEl.value === 'tola';
+      const gramsEl = entry.querySelector(`[name="${names.gramsName}"]`);
+      const tolaEl = entry.querySelector(`[name="${names.tolaName}"]`);
+      const aanaEl = entry.querySelector(`[name="${names.aanaName}"]`);
+      const laalEl = entry.querySelector(`[name="${names.laalName}"]`);
+      if (isTola) {
+        if (gramsEl) gramsEl.value = '';
+      } else {
+        if (tolaEl) tolaEl.value = '';
+        if (aanaEl) aanaEl.value = '';
+        if (laalEl) laalEl.value = '';
+      }
+      setWeightEntryPanels(entry, unitEl.value);
+      updateWeightEntryHint(entry);
+      entry.dispatchEvent(new CustomEvent('weight-updated', { bubbles: true }));
+    });
+    setWeightEntryPanels(entry, unitEl.value || 'grams');
+  }
+  entry.querySelectorAll('input').forEach((input) => {
+    input.addEventListener('input', () => {
+      updateWeightEntryHint(entry);
+      entry.dispatchEvent(new CustomEvent('weight-updated', { bubbles: true }));
+    });
+  });
+}
+
+function initAllWeightEntries() {
+  document.querySelectorAll('.weight-entry').forEach(initWeightEntry);
+}
+
+function getCalcMetal() {
+  return document.getElementById('calc-metal')?.value === 'silver' ? 'silver' : 'gold';
+}
+
+function getCalcMetalRateCache() {
+  return getCalcMetal() === 'silver' ? silverRateCache : goldRateCache;
+}
+
+function getCalcUseGram() {
+  const view = document.getElementById('view-calculator');
+  const stub = view ? buildWeightFormStub(view, 'conv') : null;
+  return stub ? getWeightUnit(stub, 'conv') !== 'tola' : true;
+}
+
+function getCalcRateLabelKey(useGram) {
+  const metal = getCalcMetal();
+  if (metal === 'silver') return useGram ? 'silverRateGram' : 'silverRateTola';
+  return useGram ? 'goldRateGram' : 'goldRateTola';
+}
+
+function persistCalcRateDraft() {
+  const rateInput = document.getElementById('gold-calc-rate');
+  if (!rateInput || rateInput.dataset.userEdited !== '1' || !rateInput.value) return;
+  calcRateDraftNpr[getCalcMetal()] = parseMoneyField(rateInput.value);
+}
+
+function applyCalcRateField() {
+  const rateInput = document.getElementById('gold-calc-rate');
+  if (!rateInput) return;
+  const metal = getCalcMetal();
+  const useGram = getCalcUseGram();
+  const draft = calcRateDraftNpr[metal];
+  if (draft != null && draft > 0) {
+    rateInput.value = useGram ? formatRateInput(draft) : formatMoneyField(draft);
+    rateInput.dataset.userEdited = '1';
+    return;
+  }
+  rateInput.dataset.userEdited = '';
+  syncGoldCalcRateField();
+}
+
+function syncGoldCalcRateUnitFromWeight() {
+  const view = document.getElementById('view-calculator');
+  const rateUnitEl = document.getElementById('gold-calc-rate-unit');
+  const rateInput = document.getElementById('gold-calc-rate');
+  if (!view || !rateUnitEl) return;
+  const stub = buildWeightFormStub(view, 'conv');
+  const weightUnit = getWeightUnit(stub, 'conv');
+  const nextRateUnit = weightUnit === 'tola' ? 'tola' : 'gram';
+  const prevRateUnit = rateUnitEl.value === 'gram' ? 'gram' : 'tola';
+  if (prevRateUnit !== nextRateUnit) {
+    const currentRate = parseMoneyField(rateInput?.value) || 0;
+    if (currentRate > 0 && rateInput?.dataset.userEdited === '1') {
+      if (prevRateUnit === 'tola' && nextRateUnit === 'gram') {
+        rateInput.value = formatGramRateFromTola(currentRate);
+      } else if (prevRateUnit === 'gram' && nextRateUnit === 'tola') {
+        rateInput.value = formatMoneyField(currentRate * TOLA_GRAMS);
+      }
+      persistCalcRateDraft();
+    } else if (rateInput) {
+      rateInput.dataset.userEdited = '';
+    }
+  }
+  rateUnitEl.value = nextRateUnit;
+}
+
+function getGoldCalcPriceWeight(ctx) {
+  if (!ctx || ctx.grams <= 0) return { qty: 0, label: '' };
+  if (ctx.unit === 'tola') {
+    const tola = ctx.grams / TOLA_GRAMS;
+    const roundedTola = Math.round(tola * 10000) / 10000;
+    const qtyLabel = Number.isInteger(roundedTola)
+      ? String(roundedTola)
+      : formatWeightQty(tola, 4);
+    return {
+      qty: tola,
+      label: qtyLabel
+    };
+  }
+  return {
+    qty: ctx.grams,
+    label: `${formatWeightQty(ctx.grams, 4)} g`
+  };
+}
+
+function updateGoldCalcRateLabel() {
+  const useGram = getCalcUseGram();
+  const label = document.getElementById('gold-calc-rate-label');
+  if (label) {
+    const key = getCalcRateLabelKey(useGram);
+    label.textContent = labelWithCurrency(key);
+    label.dataset.currencyField = key;
+  }
+}
+
+function refreshGoldCalcForCurrency(prevCurrency) {
+  const rateInput = document.getElementById('gold-calc-rate');
+  const makingInput = document.getElementById('gold-calc-making-charge');
+  const useGram = getCalcUseGram();
+
+  if (rateInput) {
+    if (rateInput.dataset.userEdited === '1' && rateInput.value) {
+      const rateNpr = displayToNprAt(rateInput.value, prevCurrency);
+      calcRateDraftNpr[getCalcMetal()] = rateNpr;
+      rateInput.value = useGram ? formatRateInput(rateNpr) : formatMoneyField(rateNpr);
+    } else {
+      rateInput.dataset.userEdited = '';
+      syncGoldCalcRateField();
+    }
+  }
+  if (makingInput?.value) {
+    const makingNpr = displayToNprAt(makingInput.value, prevCurrency);
+    makingInput.value = formatMoneyField(makingNpr);
+  }
+}
+
+function getGoldConvContext() {
+  const view = document.getElementById('view-calculator');
+  if (!view) return null;
+  const stub = buildWeightFormStub(view, 'conv');
+  const names = weightFieldNames('conv');
+  return {
+    unit: getWeightUnit(stub, 'conv'),
+    grams: getWeightGramsFromForm(stub, 'conv'),
+    form: stub,
+    tolaInput: stub.elements[names.tolaName]?.value ?? '',
+    aanaInput: stub.elements[names.aanaName]?.value ?? '',
+    laalInput: stub.elements[names.laalName]?.value ?? ''
+  };
+}
+
+function renderGoldConversionResults() {
+  const box = document.getElementById('gold-conversion-results');
+  if (!box) return;
+  const ctx = getGoldConvContext();
+  if (!ctx || ctx.grams <= 0) {
+    box.innerHTML = `<p class="gold-calc-empty">${t('calcEnterWeight')}</p>`;
+    return;
+  }
+  const { unit, grams, tolaInput, aanaInput, laalInput } = ctx;
+  const parts = gramsToTolaParts(grams);
+  const laalDisplay = formatWeightQty(parts.laal, 4);
+  const laalBreakdown = formatLaalQty(parts.laal);
+  const remainderDisplay = formatWeightQty(parts.remainderGrams, 2);
+  const gramsDisplay = formatWeightQty(grams, 4);
+  const totalTola = formatWeightQty(grams / TOLA_GRAMS, 4);
+  const tolaText = tolaInput === '' ? '0' : tolaInput;
+  const aanaText = aanaInput === '' ? '0' : aanaInput;
+  const laalText = laalInput === '' ? '0' : laalInput;
+  if (unit === 'grams') {
+    const remainderLine = parts.remainderGrams > 1e-9
+      ? `<p class="gold-conv-breakdown">${parts.tola || 0} ${t('calcTola')} (${TOLA_GRAMS} g) + ${remainderDisplay} g = ${parts.aana || 0} ${t('calcAana')} · ${laalBreakdown} ${t('calcLaal')}</p>`
+      : '';
+    box.innerHTML = `
+      <div class="gold-conv-output">
+        <h4 class="gold-results-title">${t('calcConvertedTo')}</h4>
+        <div class="gold-conv-output-grid">
+          <div class="gold-conv-output-item"><span>${t('calcTola')}</span><strong>${parts.tola || 0}</strong></div>
+          <div class="gold-conv-output-item"><span>${t('calcAana')}</span><strong>${parts.aana || 0}</strong></div>
+          <div class="gold-conv-output-item"><span>${t('calcLaal')}</span><strong>${laalDisplay}</strong></div>
+        </div>
+        ${remainderLine}
+        <p class="gold-conv-detail">${gramsDisplay} ${t('calcGrams')} = ${parts.tola || 0} ${t('weightTolaShort')} · ${parts.aana || 0} ${t('weightAanaShort')} · ${laalDisplay} ${t('weightLaalShort')}</p>
+      </div>`;
+    return;
+  }
+  box.innerHTML = `
+    <div class="gold-conv-output">
+      <h4 class="gold-results-title">${t('calcEqualsGrams')}</h4>
+      <div class="gold-conv-grams-value"><strong>${gramsDisplay}</strong><span>g</span></div>
+      <p class="gold-conv-detail">${tolaText} ${t('weightTolaShort')} · ${aanaText} ${t('weightAanaShort')} · ${laalText} ${t('weightLaalShort')} = ${gramsDisplay} g</p>
+      <p class="gold-conv-sub">${totalTola} ${t('calcTola')} (${t('calcAllUnits')})</p>
+    </div>`;
+}
+
+function renderGoldPriceResult() {
+  const box = document.getElementById('gold-price-result');
+  if (!box) return;
+  const ctx = getGoldConvContext();
+  const rateNpr = parseMoneyField(document.getElementById('gold-calc-rate')?.value) || 0;
+  const makingNpr = parseMoneyField(document.getElementById('gold-calc-making-charge')?.value) || 0;
+  if (!ctx || ctx.grams <= 0 || rateNpr <= 0) {
+    box.innerHTML = `<p class="gold-calc-empty">${t('calcEnterWeightCost')}</p>`;
+    return;
+  }
+  const { qty: weightQty, label: weightLabel } = getGoldCalcPriceWeight(ctx);
+  const goldValueNpr = weightQty * rateNpr;
+  const totalNpr = goldValueNpr + makingNpr;
+  box.innerHTML = `
+    <table class="gold-calc-table gold-price-summary">
+      <tbody>
+        <tr><th>${t('calcWeightTimesRate')}</th><td>${weightLabel} × ${formatMoney(rateNpr)} = ${formatMoney(goldValueNpr)}</td></tr>
+        <tr><th>${t('calcMakingCharge')}</th><td>${formatMoney(makingNpr)}</td></tr>
+        <tr class="gold-calc-total-row"><th>${t('calcTotalPrice')}</th><td><strong>${formatMoney(totalNpr)}</strong></td></tr>
+      </tbody>
+    </table>`;
+}
+
+function syncGoldCalcRateField() {
+  const rateInput = document.getElementById('gold-calc-rate');
+  if (!rateInput || rateInput.dataset.userEdited === '1') return;
+  const useGram = getCalcUseGram();
+  const rateCache = getCalcMetalRateCache();
+  if (!rateCache) {
+    rateInput.value = '';
+    return;
+  }
+  rateInput.value = useGram
+    ? formatGramRateFromTola(rateCache)
+    : formatMoneyField(rateCache);
+}
+
+function updateGoldCalculator() {
+  syncGoldCalcRateUnitFromWeight();
+  updateGoldCalcRateLabel();
+  syncGoldCalcRateField();
+  renderGoldConversionResults();
+  renderGoldPriceResult();
+}
+
+function initGoldCalculator() {
+  const view = document.getElementById('view-calculator');
+  if (!view || view.dataset.goldCalcBound) return;
+  view.dataset.goldCalcBound = '1';
+  const bindWeightEntry = (entry) => {
+    initWeightEntry(entry);
+    entry.addEventListener('weight-updated', updateGoldCalculator);
+    entry.addEventListener('input', updateGoldCalculator);
+  };
+  view.querySelectorAll('.weight-entry').forEach(bindWeightEntry);
+  const rateInput = document.getElementById('gold-calc-rate');
+  rateInput?.addEventListener('input', () => {
+    if (rateInput) rateInput.dataset.userEdited = '1';
+    persistCalcRateDraft();
+    updateGoldCalculator();
+  });
+  document.getElementById('gold-calc-making-charge')?.addEventListener('input', updateGoldCalculator);
+  document.getElementById('calc-metal')?.addEventListener('change', () => {
+    applyCalcRateField();
+    updateGoldCalculator();
+  });
+  updateGoldCalculator();
+}
+
+const quickCalcState = {
+  display: '0',
+  accumulator: null,
+  operator: null,
+  fresh: true
+};
+
+function resetQuickCalc() {
+  quickCalcState.display = '0';
+  quickCalcState.accumulator = null;
+  quickCalcState.operator = null;
+  quickCalcState.fresh = true;
+  renderQuickCalcDisplay();
+}
+
+function renderQuickCalcDisplay() {
+  const el = document.getElementById('quick-calc-display');
+  if (el) el.textContent = quickCalcState.display;
+}
+
+function formatQuickCalcResult(value) {
+  if (!Number.isFinite(value)) return 'Error';
+  const rounded = Math.round(value * 1e10) / 1e10;
+  const text = String(rounded);
+  return text.length > 14 ? rounded.toPrecision(12).replace(/\.?0+$/, '') : text;
+}
+
+function applyQuickCalcOp(a, b, op) {
+  switch (op) {
+    case '+': return a + b;
+    case '-': return a - b;
+    case '*': return a * b;
+    case '/': return b === 0 ? NaN : a / b;
+    default: return b;
+  }
+}
+
+function quickCalcInputDigit(digit) {
+  if (quickCalcState.display === 'Error') resetQuickCalc();
+  if (quickCalcState.fresh) {
+    quickCalcState.display = digit === '.' ? '0.' : digit;
+    quickCalcState.fresh = false;
+  } else if (digit === '.') {
+    if (!quickCalcState.display.includes('.')) quickCalcState.display += '.';
+  } else if (quickCalcState.display === '0') {
+    quickCalcState.display = digit;
+  } else {
+    quickCalcState.display += digit;
+  }
+  renderQuickCalcDisplay();
+}
+
+function quickCalcSetOperator(op) {
+  if (quickCalcState.display === 'Error') return;
+  const current = Number(quickCalcState.display);
+  if (quickCalcState.operator != null && quickCalcState.accumulator != null && !quickCalcState.fresh) {
+    const result = applyQuickCalcOp(quickCalcState.accumulator, current, quickCalcState.operator);
+    quickCalcState.display = formatQuickCalcResult(result);
+    quickCalcState.accumulator = Number(quickCalcState.display);
+  } else if (quickCalcState.accumulator == null || quickCalcState.fresh) {
+    quickCalcState.accumulator = current;
+  }
+  quickCalcState.operator = op;
+  quickCalcState.fresh = true;
+  renderQuickCalcDisplay();
+}
+
+function quickCalcEquals() {
+  if (quickCalcState.display === 'Error') return;
+  if (quickCalcState.operator == null || quickCalcState.accumulator == null) return;
+  const current = Number(quickCalcState.display);
+  const result = applyQuickCalcOp(quickCalcState.accumulator, current, quickCalcState.operator);
+  quickCalcState.display = formatQuickCalcResult(result);
+  quickCalcState.accumulator = null;
+  quickCalcState.operator = null;
+  quickCalcState.fresh = true;
+  renderQuickCalcDisplay();
+}
+
+function quickCalcBackspace() {
+  if (quickCalcState.fresh || quickCalcState.display === 'Error') return;
+  quickCalcState.display = quickCalcState.display.length <= 1
+    ? '0'
+    : quickCalcState.display.slice(0, -1);
+  renderQuickCalcDisplay();
+}
+
+function handleQuickCalcPadClick(e) {
+  const btn = e.target.closest('[data-action]');
+  if (!btn) return;
+  const action = btn.dataset.action;
+  if (action === 'digit') quickCalcInputDigit(btn.dataset.digit);
+  else if (action === 'op') quickCalcSetOperator(btn.dataset.op);
+  else if (action === 'equals') quickCalcEquals();
+  else if (action === 'clear') resetQuickCalc();
+  else if (action === 'backspace') quickCalcBackspace();
+}
+
+function handleQuickCalcKeydown(e) {
+  const modal = document.getElementById('quick-calc-modal');
+  if (!modal?.open) return;
+  if (e.key >= '0' && e.key <= '9') {
+    e.preventDefault();
+    quickCalcInputDigit(e.key);
+  } else if (e.key === '.') {
+    e.preventDefault();
+    quickCalcInputDigit('.');
+  } else if (e.key === '+') {
+    e.preventDefault();
+    quickCalcSetOperator('+');
+  } else if (e.key === '-') {
+    e.preventDefault();
+    quickCalcSetOperator('-');
+  } else if (e.key === '*') {
+    e.preventDefault();
+    quickCalcSetOperator('*');
+  } else if (e.key === '/') {
+    e.preventDefault();
+    quickCalcSetOperator('/');
+  } else if (e.key === 'Enter' || e.key === '=') {
+    e.preventDefault();
+    quickCalcEquals();
+  } else if (e.key === 'Backspace') {
+    e.preventDefault();
+    quickCalcBackspace();
+  } else if (e.key === 'Escape') {
+    modal.close();
+  } else if (e.key === 'c' || e.key === 'C') {
+    e.preventDefault();
+    resetQuickCalc();
+  }
+}
+
+function openQuickCalcModal() {
+  const modal = document.getElementById('quick-calc-modal');
+  if (!modal) return;
+  resetQuickCalc();
+  modal.showModal();
+}
+
+function initQuickCalculator() {
+  document.getElementById('open-quick-calc-btn')?.addEventListener('click', openQuickCalcModal);
+  document.getElementById('close-quick-calc-modal')?.addEventListener('click', () => {
+    document.getElementById('quick-calc-modal')?.close();
+  });
+  document.getElementById('quick-calc-pad')?.addEventListener('click', handleQuickCalcPadClick);
+  document.getElementById('quick-calc-modal')?.addEventListener('cancel', (e) => {
+    e.preventDefault();
+    e.target.close();
+  });
+  document.addEventListener('keydown', handleQuickCalcKeydown);
+}
+
+function isOrderCustomItemMode(form) {
+  const mode = form?.elements.orderItemMode?.value;
+  return mode === 'custom';
+}
+
+function setOrderItemMode(form, mode) {
+  if (!form) return;
+  const inventoryFields = document.getElementById('order-inventory-fields');
+  const customFields = document.getElementById('order-custom-fields');
+  const itemSelect = form.elements.itemId;
+  const modeInput = form.elements.orderItemMode;
+  const isCustom = mode === 'custom';
+  if (modeInput) modeInput.value = isCustom ? 'custom' : 'inventory';
+  if (inventoryFields) inventoryFields.hidden = isCustom;
+  if (customFields) customFields.hidden = !isCustom;
+  form.querySelectorAll('[data-order-item-mode]').forEach((btn) => {
+    const active = btn.dataset.orderItemMode === (isCustom ? 'custom' : 'inventory');
+    btn.classList.toggle('is-active', active);
+    btn.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  if (itemSelect) itemSelect.required = !isCustom;
+  const customName = form.elements.customItemName;
+  if (customName) customName.required = isCustom;
+  const customWeightEntry = getWeightEntryEl(form, 'custom');
+  if (customWeightEntry) {
+    customWeightEntry.querySelectorAll('input').forEach((input) => {
+      input.required = isCustom && (input.name === 'customWeightGrams' || getWeightUnit(form, 'custom') === 'tola');
+    });
+  }
+  updateOrderTotalPreview();
+  updateOrderItemWeightPreview();
 }
 
 function itemMarketValue(item, rate) {
@@ -569,6 +1285,7 @@ async function updateMetalRates(settings) {
     }
     if (rateEdit) rateEdit.hidden = false;
     refreshMetalPriceFields();
+    updateGoldCalculator();
     return;
   }
 
@@ -585,6 +1302,7 @@ async function updateMetalRates(settings) {
   }
   if (rateEdit) rateEdit.hidden = false;
   refreshMetalPriceFields();
+  updateGoldCalculator();
 }
 
 function updateMetalRatePreviews() {
@@ -650,14 +1368,26 @@ async function addStoreLocation(name) {
     toast(t('locationExists'));
     return;
   }
-  const previous = [...locationsCache];
   locationsCache = [...locationsCache, trimmed];
   renderLocationsManager();
+  toast(t('locationAdded'));
+  const input = document.getElementById('new-location-input');
+  if (input) input.value = '';
+}
+
+async function removeStoreLocation(index) {
+  const idx = Number(index);
+  if (!Number.isInteger(idx) || idx < 0 || idx >= locationsCache.length) return;
+  locationsCache = locationsCache.filter((_, i) => i !== idx);
+  renderLocationsManager();
+  toast(t('locationRemoved'));
+}
+
+async function persistStoreLocations() {
+  const previous = [...locationsCache];
   try {
     await saveStoreLocations();
-    toast(t('locationAdded'));
-    const input = document.getElementById('new-location-input');
-    if (input) input.value = '';
+    toast(t('locationsSaved'));
   } catch (err) {
     locationsCache = previous;
     renderLocationsManager();
@@ -665,20 +1395,140 @@ async function addStoreLocation(name) {
   }
 }
 
-async function removeStoreLocation(index) {
+function generateSku(prefix = 'SKU') {
+  const stamp = Date.now().toString(36).toUpperCase();
+  const rand = Math.random().toString(36).slice(2, 5).toUpperCase();
+  return `${prefix}-${stamp}${rand}`;
+}
+
+function renderCategorySelect(select, { includeAll = false, defaultValue = 'other' } = {}) {
+  if (!select) return;
+  const previous = select.value;
+  select.innerHTML = '';
+  if (includeAll) {
+    const allOpt = document.createElement('option');
+    allOpt.value = '';
+    allOpt.textContent = t('allCategories');
+    select.appendChild(allOpt);
+  }
+  itemCategoriesCache.forEach((name) => {
+    const opt = document.createElement('option');
+    opt.value = categorySlug(name);
+    opt.textContent = categoryOptionLabel(name);
+    select.appendChild(opt);
+  });
+  if (previous && [...select.options].some((o) => o.value === previous)) {
+    select.value = previous;
+  } else if (!includeAll && [...select.options].some((o) => o.value === defaultValue)) {
+    select.value = defaultValue;
+  }
+}
+
+function ensureCategoryOption(select, value) {
+  if (!select || !value) return;
+  if ([...select.options].some((o) => o.value === value)) return;
+  const opt = document.createElement('option');
+  opt.value = value;
+  opt.textContent = categoryLabel(value);
+  select.appendChild(opt);
+}
+
+function renderAllCategorySelects() {
+  renderCategorySelect(document.getElementById('pos-filter-category'), { includeAll: true });
+  renderCategorySelect(document.querySelector('#item-form select[name="category"]'));
+  renderCategorySelect(document.querySelector('#custom-item-form select[name="category"]'));
+}
+
+function renderItemCategoriesManager() {
+  const list = document.getElementById('item-categories-list');
+  if (!list) return;
+  if (!itemCategoriesCache.length) {
+    list.innerHTML = `<li class="location-empty">${t('noCategories')}</li>`;
+    return;
+  }
+  list.innerHTML = itemCategoriesCache.map((cat, idx) => {
+    const isOther = categorySlug(cat) === 'other';
+    const removeBtn = isOther
+      ? ''
+      : `<button type="button" class="location-remove" data-remove-category="${idx}" title="${t('delete')}" aria-label="${t('delete')}">×</button>`;
+    return `
+    <li class="location-tag">
+      <span>${categoryOptionLabel(cat)}</span>
+      ${removeBtn}
+    </li>`;
+  }).join('');
+}
+
+async function saveStoreItemCategories() {
+  const snapshot = [...itemCategoriesCache];
+  await api('/api/settings', {
+    method: 'PATCH',
+    body: JSON.stringify({ itemCategories: snapshot })
+  });
+  setItemCategoryNames(snapshot);
+  renderAllCategorySelects();
+  renderItemCategoriesManager();
+}
+
+async function addStoreCategory(name) {
+  const trimmed = String(name || '').trim();
+  if (!trimmed) {
+    toast(t('categoryNameRequired'));
+    return;
+  }
+  if (itemCategoriesCache.some((c) => c.toLowerCase() === trimmed.toLowerCase())) {
+    toast(t('categoryExists'));
+    return;
+  }
+  itemCategoriesCache = [...itemCategoriesCache, trimmed];
+  renderItemCategoriesManager();
+  toast(t('categoryAdded'));
+  const input = document.getElementById('new-category-input');
+  if (input) input.value = '';
+}
+
+async function removeStoreCategory(index) {
   const idx = Number(index);
-  if (!Number.isInteger(idx) || idx < 0 || idx >= locationsCache.length) return;
-  const previous = [...locationsCache];
-  locationsCache = locationsCache.filter((_, i) => i !== idx);
-  renderLocationsManager();
+  if (!Number.isInteger(idx) || idx < 0 || idx >= itemCategoriesCache.length) return;
+  if (categorySlug(itemCategoriesCache[idx]) === 'other') return;
+  itemCategoriesCache = itemCategoriesCache.filter((_, i) => i !== idx);
+  renderItemCategoriesManager();
+  toast(t('categoryRemoved'));
+}
+
+async function persistStoreItemCategories() {
+  const previous = [...itemCategoriesCache];
   try {
-    await saveStoreLocations();
-    toast(t('locationRemoved'));
+    await saveStoreItemCategories();
+    toast(t('categoriesSaved'));
   } catch (err) {
-    locationsCache = previous;
-    renderLocationsManager();
+    itemCategoriesCache = previous;
+    setItemCategoryNames(previous);
+    renderAllCategorySelects();
+    renderItemCategoriesManager();
     toast(err.message);
   }
+}
+
+function updateShopBranding(view = activeView) {
+  const shop = settingsCache.shopName || 'Suvarnapasal';
+  const brandEl = document.getElementById('brand-shop-name');
+  if (brandEl) brandEl.textContent = shop;
+  const brandLogo = document.querySelector('.brand .brand-logo');
+  if (brandLogo) brandLogo.alt = shop;
+
+  const viewTitles = {
+    pos: t('navPOS'),
+    inventory: t('navInventory'),
+    orders: t('navOrders'),
+    customers: t('navCustomers'),
+    reports: t('navReports'),
+    expenses: t('navExpenses'),
+    calculator: t('navCalculator'),
+    settings: t('viewSettingsTitle')
+  };
+  const section = viewTitles[view] || view;
+  document.title = `${shop} — ${section}`;
 }
 
 async function loadSettings() {
@@ -719,12 +1569,20 @@ async function loadSettings() {
   renderLocationDatalist();
   renderLocationsManager();
 
+  itemCategoriesCache = settings.itemCategories?.length
+    ? settings.itemCategories
+    : [...DEFAULT_ITEM_CATEGORIES];
+  setItemCategoryNames(itemCategoriesCache);
+  renderAllCategorySelects();
+  renderItemCategoriesManager();
+
   document.getElementById('settings-updated').textContent = settings.updatedAt
     ? `${t('lastSaved')} ${new Date(settings.updatedAt).toLocaleString()}`
     : '';
 
   rateHistoryCache = settings.rateHistory || [];
   renderRateHistoryTable();
+  updateShopBranding();
 }
 
 function showView(name) {
@@ -741,11 +1599,9 @@ function showView(name) {
   const addBtn = document.getElementById('add-item-btn');
   if (addBtn) addBtn.hidden = !meta.showAddItem;
 
-  document.title = name === 'inventory'
-    ? 'Suvarnapasal — Inventory'
-    : name === 'pos'
-      ? 'Suvarnapasal — POS'
-      : `Suvarnapasal — ${name.charAt(0).toUpperCase() + name.slice(1)}`;
+  updateShopBranding(name);
+
+  if (name !== 'calculator') document.getElementById('quick-calc-modal')?.close();
 
   if (name === 'orders') {
     if (ordersAllCache.length) renderOrdersView();
@@ -753,6 +1609,10 @@ function showView(name) {
   }
   if (name === 'reports') {
     loadReports().catch((e) => toast(e.message));
+  }
+  if (name === 'calculator') {
+    initGoldCalculator();
+    updateGoldCalculator();
   }
 }
 
@@ -772,21 +1632,25 @@ function renderPosCustomerDisplay() {
   const box = document.getElementById('pos-customer-display');
   const nameEl = document.getElementById('pos-customer-display-name');
   const phoneEl = document.getElementById('pos-customer-display-phone');
+  const emailEl = document.getElementById('pos-customer-display-email');
   const addressEl = document.getElementById('pos-customer-display-address');
   const name = getSaleCustomerName();
   const phone = getSaleCustomerPhone();
+  const email = String(selectedCustomer?.email || '').trim();
   const address = String(selectedCustomer?.address || '').trim();
   if (!box) return;
   if (!name) {
     box.hidden = true;
     if (nameEl) nameEl.textContent = '';
     if (phoneEl) phoneEl.textContent = '—';
+    if (emailEl) emailEl.textContent = '—';
     if (addressEl) addressEl.textContent = '—';
     return;
   }
   box.hidden = false;
   if (nameEl) nameEl.textContent = name;
   if (phoneEl) phoneEl.textContent = phone || '—';
+  if (emailEl) emailEl.textContent = email || '—';
   if (addressEl) addressEl.textContent = address || '—';
 }
 
@@ -810,6 +1674,7 @@ function applyPosCustomer(customer) {
   selectedCustomer = {
     name: String(customer?.name || '').trim(),
     phone: String(customer?.phone || '').trim(),
+    email: String(customer?.email || '').trim(),
     address: String(customer?.address || '').trim()
   };
   const search = document.getElementById('pos-customer-search');
@@ -1030,7 +1895,7 @@ function renderInventoryTable() {
 }
 
 function customItemPriceFromFields(form) {
-  const weightGrams = Number(form.weightGrams.value);
+  const weightGrams = getWeightGramsFromForm(form, '');
   const karat = Number(form.karat.value);
   const makingCharge = parseMoneyField(form.makingCharge.value) || 0;
   if (!Number.isFinite(weightGrams) || weightGrams <= 0) return null;
@@ -1098,6 +1963,12 @@ function openCustomItemModal() {
   form.quantity.value = 1;
   form.makingCharge.value = 0;
   form.hallmark.checked = true;
+  renderCategorySelect(form.category, { defaultValue: 'other' });
+  form.category.value = 'other';
+  const weightEntry = getWeightEntryEl(form, '');
+  if (form.elements.weightUnit) form.elements.weightUnit.value = 'grams';
+  setWeightEntryPanels(weightEntry, 'grams');
+  setWeightFieldsFromGrams(form, '', '');
 
   const currentName = getSaleCustomerName();
   const currentPhone = selectedCustomer?.phone || '';
@@ -1141,7 +2012,7 @@ function addCustomItemToCart(data) {
     applyPosCustomer({ name: customerName, phone: customerPhone });
   }
 
-  const sku = String(data.sku || '').trim() || `CUSTOM-${Date.now().toString(36).slice(-5).toUpperCase()}`;
+  const sku = generateSku('CUSTOM');
   const karat = Number(data.karat) || 22;
   const weightGrams = Number(data.weightGrams) || 0;
 
@@ -1685,13 +2556,48 @@ function loadExpenses() {
     : `<table class="data-table"><tbody><tr class="empty-row"><td colspan="5">${t('noResults')}</td></tr></tbody></table>`;
 }
 
+function updateOrderItemWeightPreview() {
+  const form = document.getElementById('order-form');
+  const preview = document.getElementById('order-item-weight-preview');
+  if (!form || !preview || isOrderCustomItemMode(form)) {
+    if (preview) preview.hidden = true;
+    return;
+  }
+  const item = orderItemsCache.find((i) => i.id === form.itemId?.value);
+  if (!item?.weightGrams) {
+    preview.hidden = true;
+    return;
+  }
+  preview.hidden = false;
+  preview.textContent = formatWeightParts(item.weightGrams);
+}
+
 function updateOrderTotalPreview() {
   const form = document.getElementById('order-form');
   if (!form) return;
-  const item = orderItemsCache.find((i) => i.id === form.itemId.value);
   const totalEl = document.getElementById('order-total-preview');
-  if (!item || !totalEl) { if (totalEl) totalEl.value = ''; return; }
-  totalEl.value = formatMoney(itemMarketValue(item, goldRateCache) * (Number(form.quantity.value) || 1));
+  const qty = Number(form.quantity.value) || 1;
+  if (isOrderCustomItemMode(form)) {
+    const name = String(form.customItemName?.value || '').trim();
+    const weightGrams = getWeightGramsFromForm(form, 'custom');
+    const karat = Number(form.customKarat?.value) || 22;
+    const makingCharge = parseMoneyField(form.customMakingCharge?.value) || 0;
+    if (!name || weightGrams <= 0) {
+      if (totalEl) totalEl.value = '';
+      return;
+    }
+    const unit = itemMarketValue({ weightGrams, karat, makingCharge }, goldRateCache);
+    if (totalEl) totalEl.value = formatMoney(unit * qty);
+    return;
+  }
+  const item = orderItemsCache.find((i) => i.id === form.itemId?.value);
+  if (!item || !totalEl) {
+    if (totalEl) totalEl.value = '';
+    updateOrderItemWeightPreview();
+    return;
+  }
+  totalEl.value = formatMoney(itemMarketValue(item, goldRateCache) * qty);
+  updateOrderItemWeightPreview();
 }
 
 async function updateOrderStatus(orderId, status) {
@@ -1704,14 +2610,24 @@ function openItemModal(item) {
   document.getElementById('modal-title').textContent = item ? t('editItemTitle') : t('addItemTitle');
   const form = document.getElementById('item-form');
   form.reset();
+  renderCategorySelect(form.category, { defaultValue: 'other' });
   if (item) {
     Object.entries(item).forEach(([k, v]) => {
+      if (k === 'weightGrams') return;
       const field = form.elements[k];
       if (!field) return;
       if (field.type === 'checkbox') field.checked = Boolean(v);
       else if (['makingCharge', 'purchaseCost'].includes(k)) field.value = formatMoneyField(v);
       else field.value = v;
     });
+    ensureCategoryOption(form.category, item.category);
+    form.category.value = item.category || 'other';
+    form.sku.value = item.sku || generateSku();
+    setWeightFieldsFromGrams(form, item.weightGrams, '');
+  } else {
+    form.category.value = 'other';
+    form.sku.value = generateSku();
+    setWeightFieldsFromGrams(form, '', '');
   }
   document.getElementById('item-modal').showModal();
 }
@@ -1734,14 +2650,6 @@ function billSignatureBlock(options) {
   if (!options.showSign) return '';
   return `
     <div class="bill-signatures">
-      <div class="bill-sign-block">
-        <div class="bill-sign-line">
-          <svg class="bill-sign-scribble" viewBox="0 0 120 36" aria-hidden="true">
-            <path d="M4 28 C18 8, 34 32, 48 18 S 78 6, 96 22 S 108 30, 116 14" fill="none" stroke="currentColor" stroke-width="1.5"/>
-          </svg>
-        </div>
-        <span class="bill-sign-label">${t('customerSignature')}</span>
-      </div>
       <div class="bill-sign-block">
         <div class="bill-sign-line">
           <span class="bill-sign-name">${options.signatoryName}</span>
@@ -1941,6 +2849,8 @@ async function refreshAll() {
   await loadReports();
   loadCustomers();
   loadExpenses();
+  initGoldCalculator();
+  updateGoldCalculator();
   updateTaxInputUi();
   renderCart();
 }
@@ -1956,7 +2866,7 @@ function populateOrderItemSelect() {
     }).join('')
     : `<option value="">${t('noStock')}</option>`;
   select.disabled = !orderItemsCache.length;
-  if (submitBtn) submitBtn.disabled = !orderItemsCache.length;
+  if (submitBtn) submitBtn.disabled = false;
   updateOrderTotalPreview();
 }
 
@@ -2006,6 +2916,8 @@ async function openOrderModal() {
   if (!form || !modal) return;
   form.reset();
   form.quantity.value = 1;
+  if (form.customMakingCharge) form.customMakingCharge.value = 0;
+  setOrderItemMode(form, 'inventory');
   const search = document.getElementById('order-customer-search');
   if (search) search.value = '';
 
@@ -2017,6 +2929,9 @@ async function openOrderModal() {
     } catch (_) { /* ignore */ }
   }
   populateOrderItemSelect();
+  if (!orderItemsCache.length) {
+    setOrderItemMode(form, 'custom');
+  }
   modal.showModal();
 }
 
@@ -2064,10 +2979,29 @@ document.getElementById('order-customer-suggestions')?.addEventListener('click',
   const customer = localData('subarnapasal.customers', []).find((c) => c.id === btn.dataset.orderCustomerPick);
   if (customer) fillOrderCustomerFields(customer);
 });
+document.getElementById('order-form')?.addEventListener('click', (e) => {
+  const modeBtn = e.target.closest('[data-order-item-mode]');
+  if (modeBtn) {
+    e.preventDefault();
+    setOrderItemMode(modeBtn.closest('form'), modeBtn.dataset.orderItemMode);
+  }
+});
 document.getElementById('order-form')?.addEventListener('input', (e) => {
   if (e.target.name === 'customerName') {
     const search = document.getElementById('order-customer-search');
     if (search) search.value = e.target.value;
+  }
+  if (['itemId', 'quantity', 'customItemName', 'customKarat', 'customMakingCharge'].includes(e.target.name)
+    || e.target.closest('#order-custom-fields .weight-entry')) {
+    updateOrderTotalPreview();
+  }
+});
+document.getElementById('order-form')?.addEventListener('weight-updated', () => {
+  updateOrderTotalPreview();
+});
+document.getElementById('order-form')?.addEventListener('change', (e) => {
+  if (e.target.name === 'itemId') {
+    updateOrderTotalPreview();
   }
 });
 document.getElementById('refresh-reports')?.addEventListener('click', () => loadReports().catch((e) => toast(e.message)));
@@ -2077,6 +3011,7 @@ document.getElementById('report-end')?.addEventListener('change', () => loadRepo
 document.getElementById('refresh-customers')?.addEventListener('click', loadCustomers);
 document.getElementById('add-customer-page-btn')?.addEventListener('click', openCustomerModal);
 document.getElementById('add-customer-btn')?.addEventListener('click', openCustomerModal);
+document.getElementById('clear-pos-customer-btn')?.addEventListener('click', resetPosCustomer);
 document.getElementById('add-custom-item')?.addEventListener('click', openCustomItemModal);
 document.getElementById('close-custom-item-modal')?.addEventListener('click', () => document.getElementById('custom-item-modal')?.close());
 document.getElementById('cancel-custom-item-modal')?.addEventListener('click', () => document.getElementById('custom-item-modal')?.close());
@@ -2090,7 +3025,7 @@ document.getElementById('custom-item-customer-suggestions')?.addEventListener('c
   if (customer) fillCustomItemCustomerFields(customer);
 });
 document.getElementById('custom-item-form')?.addEventListener('input', (e) => {
-  if (['weightGrams', 'karat', 'makingCharge'].includes(e.target.name)) {
+  if (e.target.closest('.weight-entry') || ['karat', 'makingCharge'].includes(e.target.name)) {
     updateCustomItemPricePreview();
   }
   if (e.target.name === 'customerName') {
@@ -2098,17 +3033,25 @@ document.getElementById('custom-item-form')?.addEventListener('input', (e) => {
     if (search) search.value = e.target.value;
   }
 });
+document.getElementById('custom-item-form')?.addEventListener('weight-updated', () => {
+  updateCustomItemPricePreview();
+});
 document.getElementById('custom-item-form')?.addEventListener('submit', (e) => {
   e.preventDefault();
   const fd = new FormData(e.target);
+  const form = e.target;
+  const weightGrams = getWeightGramsFromForm(form, '');
+  if (weightGrams <= 0) {
+    toast(t('weightRequired'));
+    return;
+  }
   addCustomItemToCart({
     customerName: fd.get('customerName'),
     customerPhone: fd.get('customerPhone'),
-    sku: fd.get('sku'),
-    category: fd.get('category'),
+    category: fd.get('category') || 'other',
     name: fd.get('name'),
     karat: fd.get('karat'),
-    weightGrams: fd.get('weightGrams'),
+    weightGrams,
     makingCharge: fd.get('makingCharge'),
     purchaseCost: fd.get('purchaseCost'),
     quantity: fd.get('quantity'),
@@ -2134,10 +3077,16 @@ document.getElementById('item-form')?.addEventListener('submit', async (e) => {
   const body = Object.fromEntries(fd.entries());
   body.hallmark = fd.get('hallmark') === 'on';
   body.karat = Number(body.karat);
-  body.weightGrams = Number(body.weightGrams);
+  body.weightGrams = getWeightGramsFromForm(e.target, '');
+  if (body.weightGrams <= 0) {
+    toast(t('weightRequired'));
+    return;
+  }
   body.makingCharge = parseMoneyField(body.makingCharge || 0);
   body.purchaseCost = parseMoneyField(body.purchaseCost || 0);
   body.quantity = Number(body.quantity);
+  body.category = body.category || 'other';
+  if (!body.sku) body.sku = generateSku();
   try {
     if (editingId) {
       await api(`/api/items/${editingId}`, { method: 'PUT', body: JSON.stringify(body) });
@@ -2255,9 +3204,30 @@ document.getElementById('bill-signatory-name')?.addEventListener('input', refres
 
 document.getElementById('order-form')?.addEventListener('submit', async (e) => {
   e.preventDefault();
-  const fd = new FormData(e.target);
+  const form = e.target;
+  const fd = new FormData(form);
+  const body = Object.fromEntries(fd.entries());
+  body.quantity = Number(body.quantity) || 1;
+  if (body.orderItemMode === 'custom') {
+    const weightGrams = getWeightGramsFromForm(form, 'custom');
+    if (!String(body.customItemName || '').trim()) {
+      toast(t('customItemNameRequired'));
+      return;
+    }
+    if (weightGrams <= 0) {
+      toast(t('weightRequired'));
+      return;
+    }
+    body.customItem = {
+      name: String(body.customItemName || '').trim(),
+      karat: Number(body.customKarat) || 22,
+      weightGrams,
+      makingCharge: parseMoneyField(body.customMakingCharge || 0)
+    };
+    delete body.itemId;
+  }
   try {
-    await api('/api/orders', { method: 'POST', body: JSON.stringify(Object.fromEntries(fd.entries())) });
+    await api('/api/orders', { method: 'POST', body: JSON.stringify(body) });
     toast(t('orderCreated'));
     document.getElementById('order-modal').close();
     e.target.reset();
@@ -2275,7 +3245,7 @@ document.getElementById('customer-form')?.addEventListener('submit', (e) => {
     id: `c-${Date.now()}`,
     name: fd.get('name'),
     phone: fd.get('phone'),
-    email: '',
+    email: fd.get('email') || '',
     address: fd.get('address') || '',
     purchases: 0
   });
@@ -2359,6 +3329,10 @@ document.getElementById('settings-store-form')?.addEventListener('submit', async
         shopPhone: fd.get('shopPhone')
       })
     });
+    settingsCache.shopName = String(fd.get('shopName') || '').trim() || settingsCache.shopName;
+    settingsCache.shopAddress = String(fd.get('shopAddress') || '').trim();
+    settingsCache.shopPhone = String(fd.get('shopPhone') || '').trim();
+    updateShopBranding();
     toast(t('settingsSaved'));
   } catch (err) { toast(err.message); }
 });
@@ -2392,6 +3366,7 @@ document.getElementById('language-select')?.addEventListener('change', (e) => {
 });
 
 document.getElementById('currency-select')?.addEventListener('change', async (e) => {
+  const prevCurrency = displayCurrency;
   setDisplayCurrency(e.target.value);
   try {
     await api('/api/settings', {
@@ -2399,15 +3374,27 @@ document.getElementById('currency-select')?.addEventListener('change', async (e)
       body: JSON.stringify({ currency: displayCurrency })
     });
     settingsCache.currency = displayCurrency;
-    await refreshAfterCurrencyChange();
+    await refreshAfterCurrencyChange(prevCurrency);
   } catch (err) {
     toast(err.message);
     await loadSettings();
   }
 });
 
+setItemCategoryNames(itemCategoriesCache);
+renderAllCategorySelects();
+initAllWeightEntries();
+initGoldCalculator();
+initQuickCalculator();
 document.getElementById('order-item-select')?.addEventListener('change', updateOrderTotalPreview);
 document.querySelector('#order-form [name="quantity"]')?.addEventListener('input', updateOrderTotalPreview);
+
+document.getElementById('save-locations-btn')?.addEventListener('click', () => {
+  persistStoreLocations().catch((err) => toast(err.message));
+});
+document.getElementById('save-categories-btn')?.addEventListener('click', () => {
+  persistStoreItemCategories().catch((err) => toast(err.message));
+});
 
 document.getElementById('view-settings')?.addEventListener('click', (e) => {
   if (e.target.closest('#add-location-btn')) {
@@ -2420,6 +3407,18 @@ document.getElementById('view-settings')?.addEventListener('click', (e) => {
   if (removeBtn) {
     e.preventDefault();
     removeStoreLocation(removeBtn.dataset.removeLocation).catch((err) => toast(err.message));
+    return;
+  }
+  if (e.target.closest('#add-category-btn')) {
+    e.preventDefault();
+    const input = document.getElementById('new-category-input');
+    addStoreCategory(input?.value).catch((err) => toast(err.message));
+    return;
+  }
+  const removeCategoryBtn = e.target.closest('[data-remove-category]');
+  if (removeCategoryBtn) {
+    e.preventDefault();
+    removeStoreCategory(removeCategoryBtn.dataset.removeCategory).catch((err) => toast(err.message));
   }
 });
 
@@ -2427,6 +3426,13 @@ document.getElementById('new-location-input')?.addEventListener('keydown', (e) =
   if (e.key === 'Enter') {
     e.preventDefault();
     addStoreLocation(e.target.value).catch((err) => toast(err.message));
+  }
+});
+
+document.getElementById('new-category-input')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    addStoreCategory(e.target.value).catch((err) => toast(err.message));
   }
 });
 

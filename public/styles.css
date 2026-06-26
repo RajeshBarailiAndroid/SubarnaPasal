@@ -207,6 +207,7 @@ body {
   grid-template-columns: 1fr;
   min-height: 100vh;
   background: var(--bg);
+  position: relative;
 }
 
 body.auth-pending .app {
@@ -647,6 +648,24 @@ body.auth-signed-out .toast {
   border-radius: var(--radius);
   display: grid;
   gap: 0.5rem;
+  position: relative;
+}
+
+.pos-customer-display-head {
+  display: flex;
+  justify-content: flex-end;
+  margin: -0.15rem 0 -0.35rem;
+}
+
+.pos-customer-clear-btn {
+  font-size: 1.25rem;
+  padding: 0.15rem 0.35rem;
+  border-radius: var(--radius);
+}
+
+.pos-customer-clear-btn:hover {
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.05);
 }
 
 .pos-customer-display[hidden] {
@@ -1158,6 +1177,11 @@ th {
   font-weight: 500;
 }
 
+.form-grid label[hidden],
+.weight-entry label[hidden] {
+  display: none !important;
+}
+
 .form-grid .span-2 { grid-column: span 2; }
 
 .check-label {
@@ -1581,9 +1605,8 @@ th {
 }
 
 .bill-signatures {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1.5rem;
+  display: flex;
+  justify-content: flex-end;
   margin-top: 1.25rem;
   padding-top: 0.75rem;
   border-top: 1px dashed rgba(201, 168, 76, 0.45);
@@ -1591,6 +1614,7 @@ th {
 
 .bill-sign-block {
   text-align: center;
+  width: min(220px, 50%);
 }
 
 .bill-sign-line {
@@ -1680,6 +1704,98 @@ th {
 .modal-head, .modal-foot { display: flex; justify-content: space-between; align-items: center; }
 .modal-head h2 { margin: 0; font-family: var(--display); font-size: 1.15rem; }
 .modal-foot { justify-content: flex-end; gap: 0.5rem; margin-top: 1rem; }
+
+.quick-calc-modal {
+  width: min(100vw - 2rem, 320px);
+  padding: 0;
+  border: 0;
+}
+
+.quick-calc-modal .modal-head {
+  padding: 1rem 1.15rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.quick-calc-body {
+  padding: 1rem 1.15rem 1.15rem;
+}
+
+.quick-calc-display {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 0.85rem;
+  padding: 0.75rem 0.85rem;
+  font-size: 1.75rem;
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  min-height: 2.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-calc-pad {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.45rem;
+}
+
+.quick-calc-btn {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 1.05rem;
+  font-weight: 500;
+  padding: 0.85rem 0.5rem;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.quick-calc-btn:hover {
+  background: var(--surface-soft);
+  border-color: var(--border-strong);
+}
+
+.quick-calc-btn:active {
+  transform: scale(0.98);
+}
+
+.quick-calc-op {
+  background: rgba(212, 175, 55, 0.12);
+  color: var(--gold-dark);
+  font-weight: 600;
+}
+
+.quick-calc-fn {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.quick-calc-eq {
+  grid-column: 4;
+  grid-row: 4 / span 2;
+  background: var(--gold);
+  border-color: var(--gold);
+  color: #fff;
+  font-weight: 700;
+}
+
+.quick-calc-eq:hover {
+  background: var(--gold-dark);
+  border-color: var(--gold-dark);
+}
+
+.quick-calc-zero {
+  grid-column: span 2;
+}
 
 .auth-modal {
   width: min(440px, calc(100vw - 2rem));
@@ -2531,6 +2647,83 @@ th {
   min-width: 0;
 }
 
+.settings-section-save {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.75rem;
+}
+
+.order-source-desc {
+  margin: 0 0 0.75rem;
+}
+
+.segmented-control {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+  padding: 0.3rem;
+  margin-bottom: 1rem;
+  border-radius: var(--radius);
+  background: rgba(0, 0, 0, 0.04);
+  border: 1px solid var(--border);
+}
+
+.segment-btn {
+  border: 0;
+  border-radius: calc(var(--radius) - 2px);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 0.65rem 0.75rem;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.segment-btn:hover {
+  color: var(--text);
+}
+
+.segment-btn.is-active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.order-source-panel {
+  margin-bottom: 0.85rem;
+}
+
+.order-summary-fields {
+  margin-top: 0.25rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--border);
+}
+
+.weight-entry.form-grid {
+  gap: 0.65rem;
+  margin-bottom: 0.15rem;
+}
+
+.weight-entry[data-weight-mode="grams"] .weight-panel-grams {
+  grid-column: 1 / -1;
+}
+
+.weight-entry[data-weight-mode="tola"] .weight-panel-laal {
+  grid-column: span 2;
+}
+
+.weight-entry .weight-conversion-hint {
+  margin-top: -0.15rem;
+}
+
+.form-hint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
 .price-mode {
   display: flex;
   flex-direction: column;
@@ -2592,6 +2785,291 @@ th {
 }
 
 .expense-total strong { color: var(--gold-dark); font-size: 1.1rem; }
+
+.gold-calc-card {
+  margin-top: 0;
+}
+
+.gold-calc-price-section {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.gold-price-calc-form {
+  margin-bottom: 0.75rem;
+}
+
+.gold-conv-weight {
+  margin-top: 0.85rem;
+}
+
+.gold-conv-results {
+  margin-top: 1rem;
+}
+
+.gold-price-result {
+  margin-top: 0;
+  padding: 1rem 1.1rem;
+  border-radius: var(--radius);
+  background: rgba(212, 175, 55, 0.1);
+  border: 1px solid rgba(212, 175, 55, 0.3);
+}
+
+.gold-price-calc-form select:disabled {
+  opacity: 1;
+  color: var(--text);
+  cursor: default;
+  background: var(--surface);
+}
+
+.gold-price-summary {
+  margin: 0;
+}
+
+.gold-price-summary .gold-calc-total-row td strong {
+  font-size: 1.2rem;
+  color: var(--gold-dark);
+}
+
+.gold-price-total {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.85rem;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px dashed rgba(212, 175, 55, 0.35);
+}
+
+.gold-price-total-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.gold-price-total-value {
+  font-size: 1.75rem;
+  color: var(--gold-dark);
+  line-height: 1.2;
+}
+
+.gold-conv-output {
+  padding: 0.9rem 1rem;
+  border-radius: var(--radius);
+  background: rgba(212, 175, 55, 0.08);
+  border: 1px solid rgba(212, 175, 55, 0.25);
+}
+
+.gold-conv-output-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.65rem;
+  margin-bottom: 0.65rem;
+}
+
+.gold-conv-output-item {
+  padding: 0.7rem 0.5rem;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  text-align: center;
+}
+
+.gold-conv-output-item span {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-bottom: 0.2rem;
+}
+
+.gold-conv-output-item strong {
+  font-size: 1.2rem;
+  color: var(--gold-dark);
+}
+
+.gold-conv-grams-value {
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.gold-conv-grams-value strong {
+  font-size: 2rem;
+  color: var(--gold-dark);
+  line-height: 1;
+}
+
+.gold-conv-grams-value span {
+  font-size: 1.1rem;
+  color: var(--muted);
+}
+
+.gold-conv-breakdown {
+  margin: 0 0 0.5rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px dashed rgba(212, 175, 55, 0.4);
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+.gold-conv-detail,
+.gold-conv-sub {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--text);
+}
+
+.gold-conv-sub {
+  margin-top: 0.35rem;
+  color: var(--muted);
+}
+
+.gold-calc-tabs {
+  grid-template-columns: repeat(3, 1fr);
+  margin-bottom: 1rem;
+}
+
+.gold-unit-reference {
+  margin-bottom: 1.25rem;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius);
+  background: rgba(212, 175, 55, 0.08);
+  border: 1px solid rgba(212, 175, 55, 0.25);
+}
+
+.gold-unit-reference h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+}
+
+.gold-unit-ref-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.35rem 1rem;
+  font-size: 0.88rem;
+  color: var(--text);
+}
+
+.gold-live-conversion {
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px dashed rgba(212, 175, 55, 0.35);
+}
+
+.gold-live-conversion[hidden] {
+  display: none !important;
+}
+
+.gold-live-title,
+.gold-results-title {
+  margin: 0 0 0.65rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.gold-unit-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 0.55rem;
+  margin-bottom: 0.85rem;
+}
+
+.gold-unit-card {
+  padding: 0.65rem 0.75rem;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  text-align: center;
+}
+
+.gold-unit-card-label {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-bottom: 0.2rem;
+}
+
+.gold-unit-card strong {
+  font-size: 1.05rem;
+  color: var(--gold-dark);
+}
+
+.gold-calc-panels {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.gold-calc-section[hidden] {
+  display: none !important;
+}
+
+.gold-calc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.5rem;
+  margin-top: 0.5rem;
+}
+
+.gold-calc-section h3 {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+}
+
+.gold-calc-section .form-hint {
+  margin-bottom: 0.75rem;
+}
+
+.gold-calc-cost-fields {
+  margin-bottom: 0.5rem;
+}
+
+.gold-calc-results {
+  margin-top: 0.85rem;
+}
+
+.gold-calc-empty {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.gold-calc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.gold-calc-table th,
+.gold-calc-table td {
+  padding: 0.5rem 0.65rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.gold-calc-table th {
+  width: 46%;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.gold-calc-total-row td strong {
+  color: var(--gold-dark);
+  font-size: 1.05rem;
+}
 
 .order-actions-cell {
   display: flex;

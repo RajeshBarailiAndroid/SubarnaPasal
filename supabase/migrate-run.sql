@@ -75,3 +75,5 @@ begin
     alter table expenses add primary key (user_id, id);
   end if;
 end $$;
+
+alter table if exists settings add column if not exists item_categories jsonb default '[]'::jsonb;

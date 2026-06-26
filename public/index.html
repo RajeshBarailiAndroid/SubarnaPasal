@@ -25,7 +25,7 @@
       <aside class="sidebar">
         <div class="brand">
           <img src="logo.svg" class="brand-logo" width="36" height="36" alt="Suvarnapasal" />
-          <strong>Suvarnapasal</strong>
+          <strong id="brand-shop-name">Suvarnapasal</strong>
         </div>
         <nav class="nav">
           <button type="button" class="nav-btn is-active" data-view="pos">
@@ -51,6 +51,10 @@
           <button type="button" class="nav-btn" data-view="expenses">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><path d="M1 10h22"/></svg>
             <span data-i18n="navExpenses">Expenses</span>
+          </button>
+          <button type="button" class="nav-btn" data-view="calculator">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 6h8M8 10h2M12 10h2M16 10h0M8 14h2M12 14h2M16 14h0M8 18h2M12 18h2M16 18h0"/></svg>
+            <span data-i18n="navCalculator">Calculator</span>
           </button>
         </nav>
         <div class="sidebar-footer">
@@ -96,6 +100,9 @@
                 </button>
               </div>
               <div id="pos-customer-display" class="pos-customer-display" hidden>
+                <div class="pos-customer-display-head">
+                  <button type="button" class="icon-btn pos-customer-clear-btn" id="clear-pos-customer-btn" data-i18n-title="clearCustomer" title="Clear customer" aria-label="Clear customer">×</button>
+                </div>
                 <div class="pos-customer-display-row">
                   <span class="pos-customer-display-label" data-i18n="customerName">Customer name</span>
                   <strong id="pos-customer-display-name"></strong>
@@ -103,6 +110,10 @@
                 <div class="pos-customer-display-row">
                   <span class="pos-customer-display-label" data-i18n="customerPhone">Phone</span>
                   <strong id="pos-customer-display-phone">—</strong>
+                </div>
+                <div class="pos-customer-display-row">
+                  <span class="pos-customer-display-label" data-i18n="email">Email</span>
+                  <strong id="pos-customer-display-email">—</strong>
                 </div>
                 <div class="pos-customer-display-row">
                   <span class="pos-customer-display-label" data-i18n="address">Address</span>
@@ -120,13 +131,6 @@
                 </div>
                 <select id="pos-filter-category" class="catalog-select">
                   <option value="" data-i18n-option="allCategories">All categories</option>
-                  <option value="ring" data-i18n-option="catRing">Ring</option>
-                  <option value="necklace" data-i18n-option="catNecklace">Necklace</option>
-                  <option value="bangle" data-i18n-option="catBangle">Bangle</option>
-                  <option value="earring" data-i18n-option="catEarring">Earring</option>
-                  <option value="coin" data-i18n-option="catCoin">Coin</option>
-                  <option value="bar" data-i18n-option="catBar">Bar</option>
-                  <option value="other" data-i18n-option="catOther">Other</option>
                 </select>
                 <select id="pos-sort" class="catalog-select">
                   <option value="name" data-i18n-option="sortName">Name (A–Z)</option>
@@ -352,6 +356,70 @@
             </article>
           </section>
 
+          <!-- Calculator -->
+          <section id="view-calculator" class="view" hidden>
+            <header class="page-header">
+              <div class="page-header-text">
+                <h1 data-i18n="calculatorPageTitle">Calculator</h1>
+                <p class="page-subtitle" data-i18n="calculatorPageDesc">Convert weight units and calculate gold or silver price from settings rates.</p>
+              </div>
+              <div class="page-header-actions">
+                <button type="button" class="btn btn-outline btn-sm btn-icon" id="open-quick-calc-btn" data-i18n-title="openQuickCalc" title="Calculator" aria-label="Calculator">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 6h8M8 10h2M12 10h2M16 10h0M8 14h2M12 14h2M16 14h0M8 18h2M12 18h2M16 18h0"/></svg>
+                </button>
+              </div>
+            </header>
+
+            <article class="panel gold-calc-card">
+              <h2 data-i18n="goldUnitConversion">Unit conversion</h2>
+              <p class="form-hint" data-i18n="goldUnitConversionDesc">Enter weight in grams or tola / aana / laal to see the other units.</p>
+              <ul class="gold-unit-ref-list">
+                <li data-i18n="calcRefTolaGrams">1 Tola = 11.66 grams</li>
+                <li data-i18n="calcRefTolaAana">1 Tola = 16 Aana</li>
+                <li data-i18n="calcRefAanaLaal">1 Aana = 6.25 Laal</li>
+                <li data-i18n="calcRefTolaLaal">1 Tola = 100 Laal</li>
+              </ul>
+
+              <div class="weight-entry form-grid gold-conv-weight" data-weight-prefix="conv" id="gold-conv-weight-entry">
+                <label class="span-2"><span data-i18n="calcConvInputUnit">Input unit</span>
+                  <select name="convWeightUnit" class="weight-unit-select">
+                    <option value="grams" data-i18n-option="weightUnitGrams">Grams</option>
+                    <option value="tola" data-i18n-option="weightUnitTola">Tola (Aana / Laal)</option>
+                  </select>
+                </label>
+                <label class="weight-panel-grams"><span data-i18n="weightGrams">Weight (grams)</span><input name="convWeightGrams" type="number" min="0" step="0.001" /></label>
+                <label class="weight-panel-tola" hidden><span data-i18n="weightTola">Tola</span><input name="convWeightTola" type="number" min="0" step="1" /></label>
+                <label class="weight-panel-aana" hidden><span data-i18n="weightAana">Aana</span><input name="convWeightAana" type="number" min="0" max="15" step="1" /></label>
+                <label class="weight-panel-laal" hidden><span data-i18n="weightLaal">Laal</span><input name="convWeightLaal" type="number" min="0" step="0.01" /></label>
+              </div>
+
+              <div id="gold-conversion-results" class="gold-calc-results gold-conv-results" aria-live="polite"></div>
+
+              <div class="gold-calc-price-section">
+                <div class="form-grid gold-price-calc-form">
+                  <label class="span-2"><span data-i18n="calcMetal">Metal</span>
+                    <select id="calc-metal">
+                      <option value="gold" data-i18n-option="calcMetalGold">Gold</option>
+                      <option value="silver" data-i18n-option="calcMetalSilver">Silver</option>
+                    </select>
+                  </label>
+                  <label class="span-2"><span data-i18n="calcRateUnit">Rate unit</span>
+                    <select id="gold-calc-rate-unit" disabled>
+                      <option value="tola" data-i18n-option="calcRatePerTola">Per tola</option>
+                      <option value="gram" data-i18n-option="calcPerGram" selected>Per gram</option>
+                    </select>
+                  </label>
+                  <label class="span-2">
+                    <span id="gold-calc-rate-label" data-currency-field="goldRateGram">Gold rate per gram</span>
+                    <input id="gold-calc-rate" type="number" min="0" step="0.01" />
+                  </label>
+                  <label class="span-2"><span data-currency-field="makingCharge">Making charge</span><input id="gold-calc-making-charge" type="number" min="0" step="100" value="0" /></label>
+                </div>
+                <div id="gold-price-result" class="gold-price-result" aria-live="polite"></div>
+              </div>
+            </article>
+          </section>
+
           <!-- Settings -->
           <section id="view-settings" class="view" hidden>
             <header class="page-header">
@@ -365,7 +433,7 @@
                 <h2 data-i18n="storeInfo">Store Information</h2>
                 <p class="panel-desc" data-i18n="storeInfoDesc">Update your store's basic details.</p>
                 <form id="settings-store-form" class="settings-form">
-                  <label><span data-i18n="shopName">Store Name</span><input name="shopName" required /></label>
+                  <label><span data-i18n="shopName">Store display name</span><input name="shopName" required /></label>
                   <label><span data-i18n="storeAddress">Address</span><input name="shopAddress" /></label>
                   <label><span data-i18n="storePhone">Contact Phone</span><input name="shopPhone" type="tel" data-i18n-placeholder="storePhonePlaceholder" placeholder="(555) 123-4567" /></label>
                   <button type="submit" class="btn btn-gold" data-i18n="saveStoreInfo">Save Store Info</button>
@@ -377,6 +445,21 @@
                   <div class="location-add-row">
                     <input type="text" id="new-location-input" data-i18n-placeholder="locationNamePh" placeholder="e.g. Desk A" maxlength="80" />
                     <button type="button" class="btn btn-outline btn-sm" id="add-location-btn" data-i18n="addLocation">Add location</button>
+                  </div>
+                  <div class="settings-section-save">
+                    <button type="button" class="btn btn-gold btn-sm" id="save-locations-btn" data-i18n="saveLocations">Save locations</button>
+                  </div>
+                </div>
+                <div class="store-locations-section">
+                  <h3 data-i18n="itemCategories">Item categories</h3>
+                  <p class="panel-desc" data-i18n="itemCategoriesDesc">Manage categories shown in inventory and POS dropdowns. "Other" is always included and selected by default for new items.</p>
+                  <ul id="item-categories-list" class="location-tag-list"></ul>
+                  <div class="location-add-row">
+                    <input type="text" id="new-category-input" data-i18n-placeholder="categoryNamePh" placeholder="e.g. Bracelet" maxlength="80" />
+                    <button type="button" class="btn btn-outline btn-sm" id="add-category-btn" data-i18n="addCategory">Add category</button>
+                  </div>
+                  <div class="settings-section-save">
+                    <button type="button" class="btn btn-gold btn-sm" id="save-categories-btn" data-i18n="saveCategories">Save categories</button>
                   </div>
                 </div>
               </article>
@@ -417,7 +500,7 @@
                     <label><span data-currency-field="goldRateTola">Gold rate per tola</span><input id="gold-rate-tola" readonly tabindex="-1" /></label>
                     <label><span data-currency-field="silverRateGram">Silver rate per gram</span><input name="silverRatePerGram" type="number" min="0" step="0.01" /></label>
                     <label><span data-currency-field="silverRateTola">Silver rate per tola</span><input id="silver-rate-tola" readonly tabindex="-1" /></label>
-                    <p class="settings-hint span-2" data-i18n="tolaHint">1 tola = 11.664 grams. Per-tola rate is calculated from the gram rate.</p>
+                    <p class="settings-hint span-2" data-i18n="weightUnitsHint">1 Tola = 11.66 grams · 1 Tola = 16 Aana · 1 Aana = 6.25 Laal. Per-tola rate is calculated from the gram rate.</p>
                   </div>
                   <div class="settings-actions">
                     <button type="submit" class="btn btn-gold" data-i18n="savePriceSettings">Save Price Settings</button>
@@ -466,8 +549,45 @@
 
         <fieldset class="modal-section">
           <legend data-i18n="orderDetails">Order details</legend>
-          <div class="form-grid">
-            <label class="span-2"><span data-i18n="item">Item</span><select name="itemId" id="order-item-select" required></select></label>
+          <p class="panel-desc order-source-desc" data-i18n="orderItemSource">How would you like to add the item?</p>
+          <div class="segmented-control order-item-mode" role="tablist" aria-label="Order item source">
+            <button type="button" class="segment-btn is-active" data-order-item-mode="inventory" role="tab" aria-selected="true">
+              <span data-i18n="orderFromInventory">Select from inventory</span>
+            </button>
+            <button type="button" class="segment-btn" data-order-item-mode="custom" role="tab" aria-selected="false">
+              <span data-i18n="orderCustomItem">Add custom item</span>
+            </button>
+          </div>
+          <input type="hidden" name="orderItemMode" value="inventory" />
+          <div id="order-inventory-fields" class="order-source-panel">
+            <p class="form-hint" data-i18n="orderInventoryHint">Choose an in-stock item from your inventory.</p>
+            <div class="form-grid">
+              <label class="span-2"><span data-i18n="item">Item</span><select name="itemId" id="order-item-select"></select></label>
+              <p id="order-item-weight-preview" class="form-hint span-2" hidden></p>
+            </div>
+          </div>
+          <div id="order-custom-fields" class="order-source-panel" hidden>
+            <p class="form-hint" data-i18n="orderCustomHint">Enter item details for a one-off or made-to-order piece.</p>
+            <div class="form-grid">
+              <label class="span-2"><span data-i18n="customItemName">Item name</span><input name="customItemName" /></label>
+              <label><span data-i18n="karat">Karat</span><select name="customKarat"><option value="24">24K</option><option value="22" selected>22K</option><option value="18">18K</option></select></label>
+              <div class="weight-entry form-grid span-2" data-weight-prefix="custom">
+                <label class="span-2"><span data-i18n="weightUnit">Weight unit</span>
+                  <select name="customWeightUnit" class="weight-unit-select">
+                    <option value="grams" data-i18n-option="weightUnitGrams">Grams</option>
+                    <option value="tola" data-i18n-option="weightUnitTola">Tola (Aana / Laal)</option>
+                  </select>
+                </label>
+                <label class="weight-panel-grams"><span data-i18n="weightGrams">Weight (grams)</span><input name="customWeightGrams" type="number" min="0" step="0.001" /></label>
+                <label class="weight-panel-tola" hidden><span data-i18n="weightTola">Tola</span><input name="customWeightTola" type="number" min="0" step="1" /></label>
+                <label class="weight-panel-aana" hidden><span data-i18n="weightAana">Aana</span><input name="customWeightAana" type="number" min="0" max="15" step="1" /></label>
+                <label class="weight-panel-laal" hidden><span data-i18n="weightLaal">Laal</span><input name="customWeightLaal" type="number" min="0" step="0.01" /></label>
+                <p class="form-hint span-2 weight-conversion-hint" hidden></p>
+              </div>
+              <label><span data-currency-field="makingCharge">Making charge</span><input name="customMakingCharge" type="number" min="0" step="100" value="0" /></label>
+            </div>
+          </div>
+          <div class="form-grid order-summary-fields">
             <label><span data-i18n="quantity">Quantity</span><input name="quantity" type="number" min="1" value="1" required /></label>
             <label><span data-currency-field="orderTotal">Order total</span><input id="order-total-preview" readonly tabindex="-1" /></label>
             <label class="span-2"><span data-i18n="note">Note</span><input name="note" data-i18n-placeholder="optionalNote" /></label>
@@ -490,6 +610,7 @@
         <div class="form-grid">
           <label class="span-2"><span data-i18n="customerNameRequired">Customer name *</span><input name="name" required autocomplete="name" /></label>
           <label class="span-2"><span data-i18n="customerPhone">Phone</span><input name="phone" type="tel" data-i18n-placeholder="customerPhonePlaceholder" placeholder="(555) 123-4567" autocomplete="tel" /></label>
+          <label class="span-2"><span data-i18n="email">Email</span><input name="email" type="email" autocomplete="email" /></label>
           <label class="span-2"><span data-i18n="address">Address</span><input name="address" autocomplete="street-address" /></label>
         </div>
         <footer class="modal-foot">
@@ -525,21 +646,24 @@
         <fieldset class="modal-section">
           <legend data-i18n="itemDetails">Item details</legend>
           <div class="form-grid">
-            <label><span data-i18n="sku">SKU</span><input name="sku" placeholder="CUSTOM-001" /></label>
             <label><span data-i18n="category">Category</span>
-              <select name="category">
-                <option value="ring" data-i18n-option="catRing">Ring</option>
-                <option value="necklace" data-i18n-option="catNecklace">Necklace</option>
-                <option value="bangle" data-i18n-option="catBangle">Bangle</option>
-                <option value="earring" data-i18n-option="catEarring">Earring</option>
-                <option value="coin" data-i18n-option="catCoin">Coin</option>
-                <option value="bar" data-i18n-option="catBar">Bar</option>
-                <option value="other" data-i18n-option="catOther" selected>Other</option>
-              </select>
+              <select name="category"></select>
             </label>
             <label class="span-2"><span data-i18n="name">Name</span><input name="name" required /></label>
             <label><span data-i18n="karat">Karat</span><select name="karat"><option value="24">24K</option><option value="22" selected>22K</option><option value="18">18K</option></select></label>
-            <label><span data-i18n="weightGrams">Weight (grams)</span><input name="weightGrams" type="number" min="0" step="0.001" required /></label>
+            <div class="weight-entry form-grid span-2" data-weight-prefix="">
+              <label class="span-2"><span data-i18n="weightUnit">Weight unit</span>
+                <select name="weightUnit" class="weight-unit-select">
+                  <option value="grams" data-i18n-option="weightUnitGrams">Grams</option>
+                  <option value="tola" data-i18n-option="weightUnitTola">Tola (Aana / Laal)</option>
+                </select>
+              </label>
+              <label class="weight-panel-grams"><span data-i18n="weightGrams">Weight (grams)</span><input name="weightGrams" type="number" min="0" step="0.001" /></label>
+              <label class="weight-panel-tola" hidden><span data-i18n="weightTola">Tola</span><input name="weightTola" type="number" min="0" step="1" /></label>
+              <label class="weight-panel-aana" hidden><span data-i18n="weightAana">Aana</span><input name="weightAana" type="number" min="0" max="15" step="1" /></label>
+              <label class="weight-panel-laal" hidden><span data-i18n="weightLaal">Laal</span><input name="weightLaal" type="number" min="0" step="0.01" /></label>
+              <p class="form-hint span-2 weight-conversion-hint" hidden></p>
+            </div>
             <label><span data-currency-field="makingCharge">Making charge</span><input name="makingCharge" type="number" min="0" step="100" value="0" /></label>
             <label><span data-currency-field="purchaseCost">Purchase cost</span><input name="purchaseCost" type="number" min="0" step="100" /></label>
             <label><span data-i18n="quantity">Quantity</span><input name="quantity" type="number" min="1" value="1" required /></label>
@@ -565,21 +689,25 @@
           <button type="button" class="icon-btn" id="close-modal">×</button>
         </header>
         <div class="form-grid">
-          <label><span data-i18n="sku">SKU</span><input name="sku" required placeholder="RNG-22K-002" /></label>
+          <label><span data-i18n="sku">SKU</span><input name="sku" readonly tabindex="-1" data-i18n-placeholder="skuAutoGenerated" placeholder="Auto-generated" /></label>
           <label><span data-i18n="category">Category</span>
-            <select name="category">
-              <option value="ring" data-i18n-option="catRing">Ring</option>
-              <option value="necklace" data-i18n-option="catNecklace">Necklace</option>
-              <option value="bangle" data-i18n-option="catBangle">Bangle</option>
-              <option value="earring" data-i18n-option="catEarring">Earring</option>
-              <option value="coin" data-i18n-option="catCoin">Coin</option>
-              <option value="bar" data-i18n-option="catBar">Bar</option>
-              <option value="other" data-i18n-option="catOther">Other</option>
-            </select>
+            <select name="category"></select>
           </label>
           <label class="span-2"><span data-i18n="name">Name</span><input name="name" required /></label>
           <label><span data-i18n="karat">Karat</span><select name="karat"><option value="24">24K</option><option value="22" selected>22K</option><option value="18">18K</option></select></label>
-          <label><span data-i18n="weightGrams">Weight (grams)</span><input name="weightGrams" type="number" min="0" step="0.001" required /></label>
+          <div class="weight-entry form-grid span-2" data-weight-prefix="">
+            <label class="span-2"><span data-i18n="weightUnit">Weight unit</span>
+              <select name="weightUnit" class="weight-unit-select">
+                <option value="grams" data-i18n-option="weightUnitGrams">Grams</option>
+                <option value="tola" data-i18n-option="weightUnitTola">Tola (Aana / Laal)</option>
+              </select>
+            </label>
+            <label class="weight-panel-grams"><span data-i18n="weightGrams">Weight (grams)</span><input name="weightGrams" type="number" min="0" step="0.001" /></label>
+            <label class="weight-panel-tola" hidden><span data-i18n="weightTola">Tola</span><input name="weightTola" type="number" min="0" step="1" /></label>
+            <label class="weight-panel-aana" hidden><span data-i18n="weightAana">Aana</span><input name="weightAana" type="number" min="0" max="15" step="1" /></label>
+            <label class="weight-panel-laal" hidden><span data-i18n="weightLaal">Laal</span><input name="weightLaal" type="number" min="0" step="0.01" /></label>
+            <p class="form-hint span-2 weight-conversion-hint" hidden></p>
+          </div>
           <label><span data-currency-field="makingCharge">Making charge</span><input name="makingCharge" type="number" min="0" step="100" /></label>
           <label><span data-currency-field="purchaseCost">Purchase cost</span><input name="purchaseCost" type="number" min="0" step="100" /></label>
           <label><span data-i18n="quantity">Quantity</span><input name="quantity" type="number" min="0" value="1" required /></label>
@@ -619,6 +747,36 @@
         <button type="button" class="btn btn-outline" id="print-bill-btn" data-i18n="printBill">Print Bill</button>
         <button type="button" class="btn btn-gold" id="bill-done-btn" data-i18n="done">Done</button>
       </footer>
+    </dialog>
+
+    <dialog id="quick-calc-modal" class="modal quick-calc-modal">
+      <header class="modal-head">
+        <h2 data-i18n="quickCalcTitle">Calculator</h2>
+        <button type="button" class="icon-btn" id="close-quick-calc-modal" data-i18n-title="close" title="Close" aria-label="Close">×</button>
+      </header>
+      <div class="quick-calc-body">
+        <output id="quick-calc-display" class="quick-calc-display" for="quick-calc-pad">0</output>
+        <div id="quick-calc-pad" class="quick-calc-pad">
+          <button type="button" class="quick-calc-btn quick-calc-fn" data-action="clear">C</button>
+          <button type="button" class="quick-calc-btn quick-calc-fn" data-action="backspace" aria-label="Backspace">⌫</button>
+          <button type="button" class="quick-calc-btn quick-calc-op" data-action="op" data-op="/">÷</button>
+          <button type="button" class="quick-calc-btn quick-calc-op" data-action="op" data-op="*">×</button>
+          <button type="button" class="quick-calc-btn" data-action="digit" data-digit="7">7</button>
+          <button type="button" class="quick-calc-btn" data-action="digit" data-digit="8">8</button>
+          <button type="button" class="quick-calc-btn" data-action="digit" data-digit="9">9</button>
+          <button type="button" class="quick-calc-btn quick-calc-op" data-action="op" data-op="-">−</button>
+          <button type="button" class="quick-calc-btn" data-action="digit" data-digit="4">4</button>
+          <button type="button" class="quick-calc-btn" data-action="digit" data-digit="5">5</button>
+          <button type="button" class="quick-calc-btn" data-action="digit" data-digit="6">6</button>
+          <button type="button" class="quick-calc-btn quick-calc-op" data-action="op" data-op="+">+</button>
+          <button type="button" class="quick-calc-btn" data-action="digit" data-digit="1">1</button>
+          <button type="button" class="quick-calc-btn" data-action="digit" data-digit="2">2</button>
+          <button type="button" class="quick-calc-btn" data-action="digit" data-digit="3">3</button>
+          <button type="button" class="quick-calc-btn quick-calc-eq" data-action="equals">=</button>
+          <button type="button" class="quick-calc-btn quick-calc-zero" data-action="digit" data-digit="0">0</button>
+          <button type="button" class="quick-calc-btn" data-action="digit" data-digit=".">.</button>
+        </div>
+      </div>
     </dialog>
 
     <div id="toast" class="toast" hidden></div>

@@ -24,7 +24,7 @@ const { getLiveMetalRates, isMetalApiConfigured, normalizeMetalCurrency } = requ
 
 const app = express();
 const PORT = process.env.PORT || 3002;
-const TOLA_GRAMS = 11.664;
+const TOLA_GRAMS = 11.66;
 const DISPLAY_CURRENCY_NPR_PER_UNIT = { USD: 133, CAD: 98 };
 const PUBLIC_API_PATHS = new Set([
   '/api/health',
@@ -91,6 +91,23 @@ function getStoreLocations(store) {
   const fromItems = [...new Set(store.items.map((i) => i.location).filter(Boolean))];
   if (fromItems.length) return fromItems;
   return ['Desk A', 'Desk B', 'Side Desk'];
+}
+
+const DEFAULT_ITEM_CATEGORIES = ['Ring', 'Necklace', 'Bangle', 'Earring', 'Coin', 'Bar', 'Other'];
+
+function normalizeItemCategories(list) {
+  const items = [...new Set(
+    (Array.isArray(list) ? list : []).map((c) => String(c).trim()).filter(Boolean)
+  )];
+  if (!items.some((c) => c.toLowerCase() === 'other')) items.push('Other');
+  return items;
+}
+
+function getStoreItemCategories(store) {
+  if (Array.isArray(store.settings.itemCategories) && store.settings.itemCategories.length) {
+    return normalizeItemCategories(store.settings.itemCategories);
+  }
+  return [...DEFAULT_ITEM_CATEGORIES];
 }
 
 function newId(prefix) {
@@ -759,6 +776,7 @@ app.get('/api/settings', asyncRoute(async (req, res) => {
   res.json({
     ...settings,
     locations: getStoreLocations(store),
+    itemCategories: getStoreItemCategories(store),
     goldRatePerGram: Number((settings.goldRatePerTola / TOLA_GRAMS).toFixed(2)),
     rateHistory: settings.rateHistory || []
   });
@@ -826,13 +844,21 @@ app.patch('/api/settings', asyncRoute(async (req, res) => {
     )];
   }
 
+  if (req.body.itemCategories != null) {
+    if (!Array.isArray(req.body.itemCategories)) {
+      return res.status(400).json({ error: 'Item categories must be an array.' });
+    }
+    store.settings.itemCategories = normalizeItemCategories(req.body.itemCategories);
+  }
+
   store.settings.updatedAt = now;
   store.settings.goldRatePerGram = Number((store.settings.goldRatePerTola / TOLA_GRAMS).toFixed(2));
   normalizeSilverRates(store.settings);
   await writeStore(store, req.userId);
   res.json({
     ...store.settings,
-    locations: getStoreLocations(store)
+    locations: getStoreLocations(store),
+    itemCategories: getStoreItemCategories(store)
   });
 }));
 
@@ -1037,21 +1063,46 @@ app.post('/api/orders', asyncRoute(async (req, res) => {
   if (!Array.isArray(store.orders)) store.orders = [];
   const body = req.body || {};
   const customerName = String(body.customerName || '').trim();
-  const itemId = String(body.itemId || '').trim();
   const quantity = Math.max(1, Number(body.quantity) || 1);
 
   if (!customerName) return res.status(400).json({ error: 'Customer name is required.' });
-  if (!itemId) return res.status(400).json({ error: 'Item is required.' });
-
-  const item = store.items.find((i) => i.id === itemId);
-  if (!item) return res.status(404).json({ error: 'Item not found.' });
-  if (item.quantity < quantity) {
-    return res.status(400).json({ error: 'Not enough stock for this order.' });
-  }
 
   const metals = await resolveMetalRates(store);
-  const line = buildOrderLine(item, quantity, goldRateForValuation(metals));
+  const goldRate = goldRateForValuation(metals);
   const now = new Date().toISOString();
+  let line;
+
+  if (body.orderItemMode === 'custom' || body.customItem) {
+    const custom = body.customItem || {};
+    const itemName = String(custom.name || body.customItemName || '').trim();
+    const weightGrams = Number(custom.weightGrams ?? body.customWeightGrams) || 0;
+    const karat = Number(custom.karat ?? body.customKarat) || 22;
+    const makingCharge = Number(custom.makingCharge ?? body.customMakingCharge) || 0;
+    if (!itemName) return res.status(400).json({ error: 'Item name is required.' });
+    if (weightGrams <= 0) return res.status(400).json({ error: 'Weight is required.' });
+    const virtualItem = {
+      id: `custom-${Date.now()}`,
+      name: itemName,
+      sku: 'CUSTOM',
+      weightGrams,
+      karat,
+      makingCharge
+    };
+    line = buildOrderLine(virtualItem, quantity, goldRate);
+    line.custom = true;
+    line.weightGrams = weightGrams;
+    line.karat = karat;
+  } else {
+    const itemId = String(body.itemId || '').trim();
+    if (!itemId) return res.status(400).json({ error: 'Item is required.' });
+    const item = store.items.find((i) => i.id === itemId);
+    if (!item) return res.status(404).json({ error: 'Item not found.' });
+    if (item.quantity < quantity) {
+      return res.status(400).json({ error: 'Not enough stock for this order.' });
+    }
+    line = buildOrderLine(item, quantity, goldRate);
+  }
+
   const order = {
     id: newId('ord'),
     orderNumber: nextOrderNumber(store),

@@ -23,6 +23,7 @@ create table if not exists settings (
   silver_rate_per_gram numeric default 0,
   currency text default 'USD',
   locations jsonb default '[]'::jsonb,
+  item_categories jsonb default '[]'::jsonb,
   rate_history jsonb default '[]'::jsonb,
   updated_at timestamptz default now()
 );
