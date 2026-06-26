@@ -511,7 +511,17 @@
                     <span id="settings-updated" class="settings-updated"></span>
                   </div>
                 </form>
-                <h3 class="rate-history-title" data-i18n="goldRateChart">Daily gold rate</h3>
+                <div class="rate-history-head">
+                  <h3 class="rate-history-title" data-i18n="goldRateChart">Gold price trend</h3>
+                  <button type="button" class="icon-btn rate-history-clear-btn" id="clear-rate-history-btn" data-i18n-title="clearRateHistory" title="Clear chart data" aria-label="Clear chart data" hidden>×</button>
+                </div>
+                <div class="segmented-control rate-history-period" role="tablist" aria-label="Chart time period">
+                  <button type="button" class="segment-btn is-active" data-rate-period="daily" role="tab" aria-selected="true" data-i18n="ratePeriodDaily">Daily</button>
+                  <button type="button" class="segment-btn" data-rate-period="weekly" role="tab" aria-selected="false" data-i18n="ratePeriodWeekly">Weekly</button>
+                  <button type="button" class="segment-btn" data-rate-period="monthly" role="tab" aria-selected="false" data-i18n="ratePeriodMonthly">Monthly</button>
+                  <button type="button" class="segment-btn" data-rate-period="yearly" role="tab" aria-selected="false" data-i18n="ratePeriodYearly">Yearly</button>
+                </div>
+                <div id="live-daily-rate-now" class="live-daily-rate-now" hidden></div>
                 <div id="rate-history-chart" class="rate-history-chart" aria-hidden="false"></div>
                 <h3 class="rate-history-title" data-i18n="rateHistory">Rate history</h3>
                 <div id="rate-history" class="table-wrap"></div>

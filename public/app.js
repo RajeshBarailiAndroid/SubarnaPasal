@@ -109,110 +109,1045 @@ function formatRateHistoryDate(row) {
   return Number.isNaN(dt.getTime()) ? raw : dt.toLocaleDateString();
 }
 
-function renderRateHistoryChart() {
-  const el = document.getElementById('rate-history-chart');
+function localDateStr(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function todayDateStr() {
+  return localDateStr();
+}
+
+function rowLocalDateStr(row) {
+  if (row.updatedAt) return localDateStr(new Date(row.updatedAt));
+  return row.date || String(row.updatedAt || '').slice(0, 10);
+}
+
+function isRowToday(row) {
+  return rowLocalDateStr(row) === todayDateStr();
+}
+
+function localDayStartIso(date = new Date()) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0).toISOString();
+}
+
+function isLiveDailyApiMode() {
+  return currentRateHistoryPriceMode() === 'api';
+}
+
+const DAILY_CHART_MIN_GAP_MS = 1000;
+const DAY_SECONDS = 86400;
+const LIVE_DAILY_MAX_TICKS_PER_DAY = 86400;
+
+function daySecondFromIso(iso) {
+  const dt = new Date(iso);
+  if (Number.isNaN(dt.getTime())) return 0;
+  return dt.getHours() * 3600 + dt.getMinutes() * 60 + dt.getSeconds();
+}
+
+function format24HourClock(daySecond) {
+  const sec = Math.max(0, Math.min(DAY_SECONDS - 1, Math.floor(daySecond)));
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+function resetLiveDailySecondSeries() {
+  liveDailySecondSeries = [];
+  liveDailySecondSeq = 0;
+}
+
+function pushLiveDailySecondTick(tolaNpr, gramNpr, saved = false) {
+  if (!tolaNpr || tolaNpr <= 0) return;
+  const gram = gramNpr || Number((tolaNpr / TOLA_GRAMS).toFixed(2));
+  const now = new Date();
+  const updatedAt = now.toISOString();
+  const daySecond = daySecondFromIso(updatedAt);
+  liveDailySecondSeq += 1;
+  const entry = {
+    date: todayDateStr(),
+    updatedAt,
+    goldRatePerTola: tolaNpr,
+    goldRatePerGram: gram,
+    daySecond,
+    secondNum: liveDailySecondSeq,
+    value: nprToDisplay(tolaNpr),
+    saved: !!saved,
+    priceMode: 'api'
+  };
+  const sameSlot = liveDailySecondSeries.findIndex(
+    (row) => row.date === entry.date && row.daySecond === daySecond
+  );
+  if (sameSlot >= 0) liveDailySecondSeries[sameSlot] = entry;
+  else liveDailySecondSeries.push(entry);
+  liveDailySecondSeries.sort((a, b) => a.daySecond - b.daySecond || a.updatedAt.localeCompare(b.updatedAt));
+  const today = todayDateStr();
+  liveDailySecondSeries = liveDailySecondSeries
+    .filter((row) => row.date === today)
+    .slice(-LIVE_DAILY_MAX_TICKS_PER_DAY);
+}
+
+function chartRowTimeMs(row) {
+  if (row.chartTime != null) return row.chartTime;
+  return new Date(row.updatedAt || row.date).getTime();
+}
+
+function nextChartTimeAfter(lastRow, minGapMs = DAILY_CHART_MIN_GAP_MS) {
+  const now = Date.now();
+  if (!lastRow) return now;
+  const lastT = new Date(lastRow.updatedAt).getTime();
+  return Math.max(now, lastT + minGapMs);
+}
+
+function spreadDailyChartTimestamps(rows) {
+  if (!rows.length) return rows;
+  const out = rows.map((row) => ({
+    ...row,
+    chartTime: chartRowTimeMs(row)
+  }));
+  for (let i = 1; i < out.length; i++) {
+    const prev = out[i - 1];
+    const curr = out[i];
+    const minT = prev.chartTime + DAILY_CHART_MIN_GAP_MS;
+    if (curr.value !== prev.value || curr.chartTime <= prev.chartTime) {
+      if (curr.chartTime < minT) curr.chartTime = minT;
+    }
+    const spreadIso = new Date(curr.chartTime).toISOString();
+    if (spreadIso !== curr.updatedAt) {
+      curr.label = formatRateHistoryIntradayLabel(spreadIso);
+    }
+  }
+  return out;
+}
+
+function normalizeRateHistoryRow(row) {
+  const updatedAt = row.updatedAt
+    || (row.date ? `${row.date}T12:00:00.000Z` : new Date().toISOString());
+  return {
+    ...row,
+    date: row.date || String(updatedAt).slice(0, 10),
+    updatedAt,
+    priceMode: row.priceMode === 'api' ? 'api' : 'manual'
+  };
+}
+
+function formatRateHistoryIntradayLabel(updatedAt) {
+  if (!updatedAt) return '—';
+  const dt = new Date(updatedAt);
+  if (Number.isNaN(dt.getTime())) return updatedAt;
+  return dt.toLocaleTimeString(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  });
+}
+
+function formatRateHistoryTableWhen(row) {
+  if (isRowToday(row)) {
+    return `${formatRateHistoryDate(row)} · ${formatRateHistoryIntradayLabel(row.updatedAt)}`;
+  }
+  return formatRateHistoryDate(row);
+}
+
+function todaySavedRateRows() {
+  const mode = currentRateHistoryPriceMode();
+  return liveDailyReadings
+    .filter((row) => row.priceMode === mode && isRowToday(row))
+    .sort((a, b) => (a.updatedAt || a.date).localeCompare(b.updatedAt || b.date));
+}
+
+function rowToDailyChartPoint(row, opts = {}) {
+  return {
+    date: row.date || String(row.updatedAt || '').slice(0, 10),
+    updatedAt: row.updatedAt || null,
+    goldRatePerTola: row.goldRatePerTola,
+    value: nprToDisplay(row.goldRatePerTola),
+    bucket: row.updatedAt || row.date,
+    label: formatRateHistoryIntradayLabel(row.updatedAt),
+    liveTick: !!opts.liveTick,
+    saved: !!opts.saved,
+    flatAnchor: !!opts.flatAnchor
+  };
+}
+
+function ensureLiveDailyFlatAnchor(tolaNpr, gramNpr) {
+  const saved = todaySavedRateRows();
+  if (saved.length) {
+    liveDailyFlatAnchor = null;
+    return;
+  }
+  if (!tolaNpr || tolaNpr <= 0) return;
+  const gram = gramNpr || Number((tolaNpr / TOLA_GRAMS).toFixed(2));
+  if (!liveDailyFlatAnchor) {
+    liveDailyFlatAnchor = normalizeRateHistoryRow({
+      date: todayDateStr(),
+      updatedAt: localDayStartIso(),
+      goldRatePerTola: tolaNpr,
+      goldRatePerGram: gram,
+      priceMode: 'api',
+      flatAnchor: true
+    });
+  }
+}
+
+function buildDailyChartSeries() {
+  if (isLiveDailyApiMode()) {
+    if (!liveDailySecondSeries.length) return [];
+    return attachRateHistoryComparisons(liveDailySecondSeries.map((row, i) => ({
+      ...rowToDailyChartPoint(row, {
+        liveTick: i === liveDailySecondSeries.length - 1,
+        saved: !!row.saved
+      }),
+      daySecond: row.daySecond ?? daySecondFromIso(row.updatedAt),
+      secondNum: row.secondNum,
+      label: format24HourClock(row.daySecond ?? daySecondFromIso(row.updatedAt))
+    })));
+  }
+
+  const saved = todaySavedRateRows();
+  if (!saved.length) return [];
+  return attachRateHistoryComparisons(saved.map((row, i) => ({
+    ...rowToDailyChartPoint(row, { saved: true }),
+    secondNum: i + 1,
+    label: formatRateHistoryIntradayLabel(row.updatedAt)
+  })));
+}
+
+function chartPointsFrom24Hour(sorted, pad, innerW, innerH, minV, span) {
+  return sorted.map((row) => {
+    const sec = row.daySecond ?? daySecondFromIso(row.updatedAt);
+    const x = pad.left + (sec / DAY_SECONDS) * innerW;
+    const y = pad.top + innerH - ((row.value - minV) / span) * innerH;
+    return { x, y, row };
+  });
+}
+
+function buildStepLinePath(points) {
+  if (!points.length) return '';
+  let d = `M${points[0].x.toFixed(1)},${points[0].y.toFixed(1)}`;
+  for (let i = 1; i < points.length; i++) {
+    d += ` H${points[i].x.toFixed(1)} V${points[i].y.toFixed(1)}`;
+  }
+  return d;
+}
+
+function buildStepAreaPath(points, baseY) {
+  if (!points.length) return '';
+  const line = buildStepLinePath(points);
+  const last = points[points.length - 1];
+  const first = points[0];
+  return `${line} L${last.x.toFixed(1)},${baseY} L${first.x.toFixed(1)},${baseY} Z`;
+}
+
+function buildStockLinePath(points) {
+  return points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+}
+
+function build24HourXGrid(pad, innerW, innerH, h) {
+  const hours = [0, 4, 8, 12, 16, 20, 24];
+  return hours.map((hour) => {
+    const x = pad.left + ((hour * 3600) / DAY_SECONDS) * innerW;
+    const label = hour === 24 ? '24:00' : `${String(hour).padStart(2, '0')}:00`;
+    return `<line x1="${x.toFixed(1)}" y1="${pad.top}" x2="${x.toFixed(1)}" y2="${pad.top + innerH}" class="gp-vgrid"/>
+      <text x="${x.toFixed(1)}" y="${h - 10}" class="gp-x-label" text-anchor="middle">${label}</text>`;
+  }).join('');
+}
+
+function renderGoldPriceOrgHeader(sorted, mode, period) {
+  const open = sorted[0];
+  const latest = sorted[sorted.length - 1];
+  const values = sorted.map((r) => r.value);
+  const high = Math.max(...values);
+  const low = Math.min(...values);
+  const sessionChange = Number((latest.value - open.value).toFixed(4));
+  const sessionPct = open.value
+    ? Number(((sessionChange / open.value) * 100).toFixed(2))
+    : 0;
+  const dir = stockSessionDirection(sorted);
+  const sign = sessionChange > 0 ? '+' : '';
+  const arrow = dir === 'up' ? '▲' : dir === 'down' ? '▼' : '—';
+  const periodLabel = ratePeriodLabel(period);
+  const isLive = period === 'daily' && isLiveDailyApiMode();
+  const updatedLabel = isLive && liveDailyCurrentTick
+    ? formatRateHistoryTableWhen(liveDailyCurrentTick)
+    : formatRateHistoryTableWhen(latest);
+  return `
+    <div class="goldprice-chart-header">
+      <div class="goldprice-header-main">
+        <div class="goldprice-brand">
+          <span class="goldprice-icon" aria-hidden="true">●</span>
+          <div>
+            <h4 class="goldprice-title">${t('goldSpotPrice')}</h4>
+            <span class="goldprice-sub">${periodLabel} · ${rateHistoryModeLabel(mode)}</span>
+          </div>
+        </div>
+        <div class="goldprice-quote is-${dir}">
+          <span class="goldprice-value">${formatCurrencyAmount(latest.value)}</span>
+          <span class="goldprice-unit">/ ${t('tolaUnit')}</span>
+          <span class="goldprice-change">
+            <span class="goldprice-arrow" aria-hidden="true">${arrow}</span>
+            ${sign}${formatCurrencyAmount(sessionChange)}
+            <span class="goldprice-pct">(${sign}${sessionPct}%)</span>
+          </span>
+        </div>
+      </div>
+      <div class="goldprice-stats">
+        <span class="goldprice-stat"><em>${t('chartOpen')}</em> ${formatCurrencyAmount(open.value)}</span>
+        <span class="goldprice-stat"><em>${t('chartHigh')}</em> ${formatCurrencyAmount(high)}</span>
+        <span class="goldprice-stat"><em>${t('chartLow')}</em> ${formatCurrencyAmount(low)}</span>
+        <span class="goldprice-stat goldprice-updated"><em>${t('chartUpdated')}</em> ${updatedLabel}</span>
+      </div>
+    </div>`;
+}
+
+function goldPriceOrgSvgDefs() {
+  return `<defs>
+    <linearGradient id="goldPriceArea" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="rgba(212,175,55,0.5)"/>
+      <stop offset="45%" stop-color="rgba(201,162,39,0.18)"/>
+      <stop offset="100%" stop-color="rgba(201,162,39,0)"/>
+    </linearGradient>
+    <filter id="goldPriceGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="1.5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>`;
+}
+
+function buildGoldPriceAreaPath(points, baseY, useStep) {
+  if (points.length < 2) return '';
+  const line = useStep ? buildStepLinePath(points) : buildStockLinePath(points);
+  const last = points[points.length - 1];
+  const first = points[0];
+  return `${line} L${last.x.toFixed(1)},${baseY} L${first.x.toFixed(1)},${baseY} Z`;
+}
+
+function buildGoldPriceLinePath(points, useStep) {
+  return useStep ? buildStepLinePath(points) : buildStockLinePath(points);
+}
+
+function buildGoldPriceXGrid(pad, innerW, innerH, h, period) {
+  if (period === 'daily' && isLiveDailyApiMode()) {
+    return build24HourXGrid(pad, innerW, innerH, h);
+  }
+  return '';
+}
+
+function renderGoldPriceOrgChart(el, sorted, mode, period, intradayList) {
+  const isDailyLive = period === 'daily' && isLiveDailyApiMode();
+  const useStep = isDailyLive;
+  const w = 900;
+  const h = isDailyLive ? 360 : 300;
+  const pad = { top: 16, right: 78, bottom: 40, left: 12 };
+  const innerW = w - pad.left - pad.right;
+  const innerH = h - pad.top - pad.bottom;
+  const values = sorted.map((r) => r.value);
+  const { minV, maxV } = chartValueBounds(values);
+  const span = maxV - minV || 1;
+  const points = isDailyLive
+    ? chartPointsFrom24Hour(sorted, pad, innerW, innerH, minV, span)
+    : chartPointsFromSeries(sorted, pad, innerW, innerH, minV, span, period);
+  const baseY = pad.top + innerH;
+  const sessionDir = stockSessionDirection(sorted);
+  const linePath = buildGoldPriceLinePath(points, useStep);
+  const areaPath = buildGoldPriceAreaPath(points, baseY, useStep);
+  const latest = sorted[sorted.length - 1];
+  const lastPt = points[points.length - 1];
+
+  const yTicks = 5;
+  const yLabels = Array.from({ length: yTicks + 1 }, (_, i) => {
+    const v = minV + (span * i) / yTicks;
+    const y = pad.top + innerH - (i / yTicks) * innerH;
+    return `<text x="${w - 8}" y="${y + 4}" class="gp-y-label" text-anchor="end">${formatChartAxisAmount(v)}</text>
+      <line x1="${pad.left}" y1="${y}" x2="${w - pad.right}" y2="${y}" class="gp-hgrid"/>`;
+  }).join('');
+
+  let xLabels = buildGoldPriceXGrid(pad, innerW, innerH, h, period);
+  if (!xLabels && points.length) {
+    const n = points.length;
+    const indices = n <= 5 ? points.map((_, i) => i) : [0, Math.floor((n - 1) / 2), n - 1];
+    xLabels = indices.map((i) => {
+      const label = sorted[i].liveTick ? t('liveRateNow') : sorted[i].label;
+      return `<text x="${points[i].x}" y="${h - 8}" class="gp-x-label" text-anchor="middle">${label}</text>`;
+    }).join('');
+  }
+
+  const lastDot = lastPt
+    ? `<g transform="translate(${lastPt.x.toFixed(1)},${lastPt.y.toFixed(1)})">
+        <circle r="9" class="gp-live-pulse is-${sessionDir}"/>
+        <circle r="5" class="gp-live-dot is-${sessionDir}">
+          <title>${formatCurrencyAmount(latest.value)}</title>
+        </circle>
+      </g>`
+    : '';
+
+  el.innerHTML = `
+    <div class="goldprice-chart">
+      ${renderGoldPriceOrgHeader(sorted, mode, period)}
+      <div class="goldprice-canvas-wrap">
+        <svg class="goldprice-svg" viewBox="0 0 ${w} ${h}" role="img" aria-label="${t('goldRateChart')}" preserveAspectRatio="xMidYMid meet">
+          ${goldPriceOrgSvgDefs()}
+          <rect x="0" y="0" width="${w}" height="${h}" class="gp-bg"/>
+          ${yLabels}
+          ${xLabels}
+          ${areaPath ? `<path d="${areaPath}" class="gp-area" fill="url(#goldPriceArea)"/>` : ''}
+          ${linePath ? `<path d="${linePath}" class="gp-line" filter="url(#goldPriceGlow)"/>` : ''}
+          ${lastDot}
+        </svg>
+      </div>
+      <div class="goldprice-footer">
+        <span>${ratePeriodHint(period)}</span>
+        <span class="goldprice-powered">${t('goldChartPowered')}</span>
+      </div>
+      ${intradayList}
+    </div>`;
+  const liveBanner = document.getElementById('live-daily-rate-now');
+  if (liveBanner) liveBanner.hidden = true;
+  updateRateHistoryClearBtn();
+}
+
+function stockSessionDirection(sorted) {
+  if (sorted.length < 2) return 'flat';
+  const change = sorted[sorted.length - 1].value - sorted[0].value;
+  if (change > 0) return 'up';
+  if (change < 0) return 'down';
+  return 'flat';
+}
+
+function chartPointsFromSeries(sorted, pad, innerW, innerH, minV, span, period) {
+  const useTimeAxis = period === 'daily';
+  let minT = 0;
+  let maxT = 1;
+  if (useTimeAxis) {
+    const times = sorted.map((row) => chartRowTimeMs(row));
+    const dayStart = new Date(localDayStartIso()).getTime();
+    const now = Date.now();
+    minT = Math.min(...times, dayStart);
+    maxT = Math.max(...times, now);
+    if (maxT <= minT) maxT = minT + 60000;
+  }
+  const n = sorted.length;
+  return sorted.map((row, i) => {
+    const x = useTimeAxis
+      ? pad.left + ((chartRowTimeMs(row) - minT) / (maxT - minT)) * innerW
+      : pad.left + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
+    const y = pad.top + innerH - ((row.value - minV) / span) * innerH;
+    return { x, y, row };
+  });
+}
+
+function updateLiveDailyTick(tolaNpr, gramNpr, priceMode) {
+  const mode = priceMode === 'api' ? 'api' : 'manual';
+  liveDailyCurrentTick = normalizeRateHistoryRow({
+    date: todayDateStr(),
+    updatedAt: new Date().toISOString(),
+    goldRatePerTola: tolaNpr,
+    goldRatePerGram: gramNpr || Number((tolaNpr / TOLA_GRAMS).toFixed(2)),
+    priceMode: mode,
+    liveTick: true
+  });
+}
+
+function renderLiveDailyRateNow() {
+  const el = document.getElementById('live-daily-rate-now');
   if (!el) return;
-  const sorted = [...rateHistoryCache]
+  const chartEl = document.getElementById('rate-history-chart');
+  const chartHasData = chartEl?.querySelector('.goldprice-chart');
+  const show = activeView === 'settings'
+    && currentRateHistoryPeriod() === 'daily'
+    && isLiveDailyApiMode()
+    && liveDailyCurrentTick
+    && !chartHasData;
+  if (!show) {
+    el.hidden = true;
+    return;
+  }
+  el.hidden = false;
+  el.className = 'live-daily-rate-now goldprice-live-banner';
+  const open = liveDailySecondSeries[0];
+  const latest = liveDailyCurrentTick;
+  const openVal = open ? nprToDisplay(open.goldRatePerTola) : nprToDisplay(latest.goldRatePerTola);
+  const latestVal = nprToDisplay(latest.goldRatePerTola);
+  const change = Number((latestVal - openVal).toFixed(4));
+  const pct = openVal ? Number(((change / openVal) * 100).toFixed(2)) : 0;
+  const dir = change > 0 ? 'up' : change < 0 ? 'down' : 'flat';
+  const sign = change > 0 ? '+' : '';
+  const arrow = dir === 'up' ? '▲' : dir === 'down' ? '▼' : '—';
+  el.innerHTML = `
+    <span class="live-daily-rate-badge">${t('liveRateNow')}</span>
+    <strong class="live-daily-rate-price stock-live-price is-${dir}">${formatMoney(latest.goldRatePerTola)}/tola</strong>
+    <span class="stock-chart-change is-${dir} stock-live-change">
+      <span class="stock-chart-arrow" aria-hidden="true">${arrow}</span>
+      ${sign}${formatCurrencyAmount(change)} (${sign}${pct}%)
+    </span>
+    <span class="live-daily-rate-time">${formatRateHistoryTableWhen(latest)}</span>
+    <span class="live-daily-rate-hint">${t('liveRateNotSaved')}</span>`;
+}
+
+function todayRateHistoryRows() {
+  if (currentRateHistoryPeriod() === 'daily') {
+    return buildDailyChartSeries();
+  }
+  return rateHistoryForDisplay()
+    .filter(isRowToday)
+    .sort((a, b) => (a.updatedAt || a.date).localeCompare(b.updatedAt || b.date));
+}
+
+function hydrateLiveDailyReadingsFromCache() {
+  liveDailyReadings = rateHistoryForDisplay()
+    .filter(isRowToday)
+    .sort((a, b) => (a.updatedAt || a.date).localeCompare(b.updatedAt || b.date));
+}
+
+function hydrateLiveDailySecondSeriesFromTicks(ticks) {
+  liveDailySecondSeries = (ticks || []).map((row) => ({
+    date: row.date || todayDateStr(),
+    updatedAt: row.updatedAt,
+    goldRatePerTola: row.goldRatePerTola,
+    goldRatePerGram: row.goldRatePerGram,
+    daySecond: row.daySecond ?? daySecondFromIso(row.updatedAt),
+    secondNum: row.secondNum,
+    value: nprToDisplay(row.goldRatePerTola),
+    saved: !!row.saved,
+    priceMode: row.priceMode === 'api' ? 'api' : 'manual'
+  })).sort((a, b) => a.daySecond - b.daySecond || a.updatedAt.localeCompare(b.updatedAt));
+  liveDailySecondSeq = liveDailySecondSeries.length
+    ? Math.max(...liveDailySecondSeries.map((r) => r.secondNum || 0))
+    : 0;
+}
+
+async function loadSharedGoldRates() {
+  const mode = currentRateHistoryPriceMode();
+  try {
+    const payload = await api(
+      `/api/shared/gold-rates?date=${encodeURIComponent(todayDateStr())}&priceMode=${encodeURIComponent(mode)}`
+    );
+    rateHistoryCache = (payload.history || []).map(normalizeRateHistoryRow);
+    hydrateLiveDailyReadingsFromCache();
+    hydrateLiveDailySecondSeriesFromTicks(payload.ticks || []);
+  } catch (_) { /* background load */ }
+}
+
+const SHARED_TICK_FLUSH_MS = 10000;
+let sharedTickQueue = new Map();
+let sharedTickFlushTimer = null;
+
+function sharedTickKey(row) {
+  const mode = row.priceMode === 'api' ? 'api' : 'manual';
+  return `${row.date}|${mode}|${row.daySecond}`;
+}
+
+function rowToSharedTickPayload(row) {
+  return {
+    date: row.date || todayDateStr(),
+    updatedAt: row.updatedAt,
+    daySecond: row.daySecond ?? daySecondFromIso(row.updatedAt),
+    secondNum: row.secondNum,
+    goldRatePerTola: row.goldRatePerTola,
+    goldRatePerGram: row.goldRatePerGram,
+    priceMode: row.priceMode || (isLiveDailyApiMode() ? 'api' : 'manual'),
+    saved: !!row.saved
+  };
+}
+
+function queueSharedGraphTick(row) {
+  if (!row?.goldRatePerTola) return;
+  sharedTickQueue.set(sharedTickKey(row), rowToSharedTickPayload(row));
+  if (row.saved) {
+    flushSharedGraphTicks();
+    return;
+  }
+  scheduleSharedGraphTickFlush();
+}
+
+function scheduleSharedGraphTickFlush() {
+  if (sharedTickFlushTimer) return;
+  sharedTickFlushTimer = setTimeout(() => {
+    sharedTickFlushTimer = null;
+    flushSharedGraphTicks();
+  }, SHARED_TICK_FLUSH_MS);
+}
+
+async function flushSharedGraphTicks() {
+  if (!sharedTickQueue.size) return;
+  const ticks = [...sharedTickQueue.values()];
+  sharedTickQueue.clear();
+  if (sharedTickFlushTimer) {
+    clearTimeout(sharedTickFlushTimer);
+    sharedTickFlushTimer = null;
+  }
+  try {
+    await api('/api/shared/gold-rates/ticks', {
+      method: 'POST',
+      body: JSON.stringify({ ticks })
+    });
+  } catch (_) { /* background save */ }
+}
+
+function sameGoldRateReading(a, tolaNpr, gramNpr) {
+  const gram = gramNpr || Number((tolaNpr / TOLA_GRAMS).toFixed(2));
+  return Number(a.goldRatePerTola) === Number(tolaNpr)
+    && Number(a.goldRatePerGram) === Number(gram);
+}
+
+function pushLiveDailyReading(tolaNpr, gramNpr, priceMode) {
+  const mode = priceMode === 'api' ? 'api' : 'manual';
+  if (!tolaNpr || tolaNpr <= 0) return false;
+  const gram = gramNpr || Number((tolaNpr / TOLA_GRAMS).toFixed(2));
+  const last = liveDailyReadings[liveDailyReadings.length - 1];
+  if (last && sameGoldRateReading(last, tolaNpr, gram)) return false;
+  const updatedAt = new Date(nextChartTimeAfter(last, DAILY_CHART_MIN_GAP_MS)).toISOString();
+  const entry = normalizeRateHistoryRow({
+    date: todayDateStr(),
+    updatedAt,
+    goldRatePerTola: tolaNpr,
+    goldRatePerGram: gram,
+    priceMode: mode
+  });
+  liveDailyReadings.push(entry);
+  if (liveDailyReadings.length > 500) liveDailyReadings.shift();
+  return true;
+}
+
+function updateMetalRateHeaderFromLive(live) {
+  const goldEl = document.getElementById('metal-rate-gold');
+  const silverEl = document.getElementById('metal-rate-silver');
+  const bodyEl = document.getElementById('metal-rates-body');
+  if (bodyEl) bodyEl.hidden = true;
+  if (goldEl) {
+    goldEl.hidden = false;
+    goldEl.textContent =
+      `Gold: ${formatCurrencyAmount(live.gold.perTola)}/tola · ${formatCurrencyAmount(live.gold.perGram)}/g`;
+  }
+  if (silverEl) {
+    silverEl.hidden = false;
+    silverEl.textContent =
+      `Silver: ${formatCurrencyAmount(live.silver.perTola)}/tola · ${formatCurrencyAmount(live.silver.perGram)}/g`;
+  }
+}
+
+async function captureLiveDailyRate() {
+  const mode = isLiveDailyApiMode() ? 'api' : (settingsPriceMode === 'api' ? 'api' : 'manual');
+  let tolaNpr = goldRateCache;
+  let gramNpr = Number((tolaNpr / TOLA_GRAMS).toFixed(2));
+
+  if (mode === 'api') {
+    try {
+      const live = await api(`/api/metal-rates?currency=${encodeURIComponent(currencyCode())}`);
+      tolaNpr = displayToNpr(live.gold.perTola);
+      gramNpr = displayToNpr(live.gold.perGram);
+      goldRateCache = tolaNpr;
+      silverRateCache = displayToNpr(live.silver.perTola);
+      updateMetalRateHeaderFromLive(live);
+      refreshMetalPriceFields();
+      updateGoldCalculator();
+      updateOrderTotalPreview();
+    } catch (err) {
+      if (tolaNpr <= 0) throw err;
+    }
+  } else if (tolaNpr <= 0) {
+    return;
+  }
+
+  if (mode === 'api') {
+    const added = pushLiveDailyReading(tolaNpr, gramNpr, mode);
+    pushLiveDailySecondTick(tolaNpr, gramNpr, added);
+    updateLiveDailyTick(tolaNpr, gramNpr, mode);
+    const daySecond = daySecondFromIso(new Date().toISOString());
+    const tick = liveDailySecondSeries.find((r) => r.daySecond === daySecond)
+      || liveDailySecondSeries[liveDailySecondSeries.length - 1];
+    if (tick) queueSharedGraphTick(tick);
+    if (added) {
+      persistDailyGoldRateSnapshot(mode, { goldRatePerTola: tolaNpr, goldRatePerGram: gramNpr });
+    }
+  } else {
+    const added = pushLiveDailyReading(tolaNpr, gramNpr, mode);
+    if (added) {
+      persistDailyGoldRateSnapshot(mode, { goldRatePerTola: tolaNpr, goldRatePerGram: gramNpr });
+    }
+  }
+
+  if (activeView === 'settings' && currentRateHistoryPeriod() === 'daily') {
+    renderLiveDailyRateNow();
+    renderRateHistoryChart();
+    renderRateHistoryTable();
+  }
+}
+
+function renderRateIntradayReadingsHtml(rows, period) {
+  if (period !== 'daily' || !rows.length) return '';
+  const compared = attachRateHistoryComparisons(rows);
+  return `
+    <div class="rate-intraday-readings">
+      <h4 class="rate-intraday-title">${t('rateHistoryToday')}</h4>
+      <div class="table-wrap">
+        <table class="data-table rate-intraday-table">
+          <thead><tr>
+            <th>${t('date')}</th>
+            <th>${t('perTolaCol')}</th>
+            <th>${t('changeCol')}</th>
+          </tr></thead>
+          <tbody>
+            ${compared.map((row) => {
+              const changeHtml = row.change == null
+                ? '—'
+                : `<span class="rate-chart-compare ${rateHistoryChangeClass(row.change)}">${formatRateHistoryChange(row, 'daily')}</span>`;
+              return `<tr>
+                <td>${formatRateHistoryTableWhen(row)}</td>
+                <td>${formatMoney(row.goldRatePerTola)}</td>
+                <td>${changeHtml}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function currentRateHistoryPeriod() {
+  const active = document.querySelector('.rate-history-period [data-rate-period].is-active');
+  const period = active?.dataset.ratePeriod;
+  if (period === 'weekly' || period === 'monthly' || period === 'yearly') return period;
+  return 'daily';
+}
+
+function ratePeriodLabel(period) {
+  const keys = {
+    daily: 'ratePeriodDaily',
+    weekly: 'ratePeriodWeekly',
+    monthly: 'ratePeriodMonthly',
+    yearly: 'ratePeriodYearly'
+  };
+  return t(keys[period] || keys.daily);
+}
+
+function ratePeriodHint(period) {
+  const keys = {
+    daily: 'ratePeriodDailyHint',
+    weekly: 'ratePeriodWeeklyHint',
+    monthly: 'ratePeriodMonthlyHint',
+    yearly: 'ratePeriodYearlyHint'
+  };
+  return t(keys[period] || keys.daily);
+}
+
+function rateCompareVsPrevLabel(period) {
+  const keys = {
+    daily: 'rateCompareVsPrevReading',
+    weekly: 'rateCompareVsPrevWeek',
+    monthly: 'rateCompareVsPrevMonth',
+    yearly: 'rateCompareVsPrevMonth'
+  };
+  return t(keys[period] || keys.daily);
+}
+
+function getRateHistoryBucketKey(dateStr, period) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  if (period === 'monthly' || period === 'yearly') {
+    return `${y}-${String(m).padStart(2, '0')}`;
+  }
+  if (period === 'weekly') {
+    const dt = new Date(y, m - 1, d);
+    const day = dt.getDay();
+    const diff = dt.getDate() - day + (day === 0 ? -6 : 1);
+    const monday = new Date(dt);
+    monday.setDate(diff);
+    return `${monday.getFullYear()}-${String(monday.getMonth() + 1).padStart(2, '0')}-${String(monday.getDate()).padStart(2, '0')}`;
+  }
+  return dateStr;
+}
+
+function formatRateHistoryBucketLabel(bucket, period) {
+  if (period === 'daily') return formatRateHistoryDate({ date: bucket });
+  if (period === 'monthly' || period === 'yearly') {
+    const [y, m] = bucket.split('-').map(Number);
+    return new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+  }
+  const [y, m, d] = bucket.split('-').map(Number);
+  const weekStart = new Date(y, m - 1, d);
+  return weekStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function attachRateHistoryComparisons(rows) {
+  return rows.map((row, i) => {
+    const prev = i > 0 ? rows[i - 1] : null;
+    const change = prev ? Number((row.value - prev.value).toFixed(4)) : null;
+    const changePct = prev && prev.value
+      ? Number(((change / prev.value) * 100).toFixed(2))
+      : null;
+    return { ...row, change, changePct };
+  });
+}
+
+function formatRateHistoryChange(row, period) {
+  if (row.change == null) return '';
+  const sign = row.change > 0 ? '+' : '';
+  const amount = formatCurrencyAmount(row.change);
+  const pct = row.changePct != null ? ` (${sign}${row.changePct}%)` : '';
+  return `${sign}${amount}${pct} ${rateCompareVsPrevLabel(period)}`;
+}
+
+function rateHistoryChangeClass(change) {
+  if (change == null) return '';
+  if (change > 0) return 'is-up';
+  if (change < 0) return 'is-down';
+  return 'is-flat';
+}
+
+function aggregateRateHistoryForChart(rows, period) {
+  const sorted = [...rows]
     .map((row) => ({
       date: row.date || String(row.updatedAt || '').slice(0, 10),
+      updatedAt: row.updatedAt || null,
       goldRatePerTola: row.goldRatePerTola,
       value: nprToDisplay(row.goldRatePerTola)
     }))
     .filter((row) => row.date && row.value > 0)
-    .sort((a, b) => a.date.localeCompare(b.date));
+    .sort((a, b) => (a.updatedAt || a.date).localeCompare(b.updatedAt || b.date));
 
-  if (sorted.length < 2) {
-    el.innerHTML = `<p class="empty rate-chart-empty">${t('noRateHistoryChart')}</p>`;
+  let source = sorted;
+  if (period === 'yearly') {
+    const year = new Date().getFullYear();
+    source = sorted.filter((row) => Number(row.date.slice(0, 4)) === year);
+  }
+
+  if (period === 'daily') {
+    const intraday = source.filter((row) => isRowToday(row));
+    return attachRateHistoryComparisons(intraday.map((row) => ({
+      ...row,
+      bucket: row.updatedAt || row.date,
+      label: formatRateHistoryIntradayLabel(row.updatedAt)
+    })));
+  }
+
+  const bucketPeriod = period === 'yearly' ? 'yearly' : period;
+  const buckets = new Map();
+  source.forEach((row) => {
+    const bucket = getRateHistoryBucketKey(row.date, bucketPeriod);
+    const sortKey = row.updatedAt || row.date;
+    const existing = buckets.get(bucket);
+    if (!existing || sortKey > (existing.updatedAt || existing.date)) {
+      buckets.set(bucket, {
+        ...row,
+        bucket,
+        label: formatRateHistoryBucketLabel(bucket, bucketPeriod)
+      });
+    }
+  });
+  return attachRateHistoryComparisons(
+    [...buckets.values()].sort((a, b) => a.bucket.localeCompare(b.bucket))
+  );
+}
+
+function currentRateHistoryPriceMode() {
+  const checked = document.querySelector('#settings-form [name="priceMode"]:checked');
+  if (checked) return checked.value === 'api' ? 'api' : 'manual';
+  return settingsPriceMode === 'api' ? 'api' : 'manual';
+}
+
+function rateHistoryForDisplay() {
+  const mode = currentRateHistoryPriceMode();
+  return rateHistoryCache
+    .map(normalizeRateHistoryRow)
+    .filter((row) => row.priceMode === mode);
+}
+
+function rateHistoryModeLabel(mode) {
+  return mode === 'api' ? t('useLiveApi') : t('useManualPrice');
+}
+
+function updateRateHistoryClearBtn() {
+  const btn = document.getElementById('clear-rate-history-btn');
+  if (!btn) return;
+  const hasData = currentRateHistoryPeriod() === 'daily'
+    ? (isLiveDailyApiMode() ? liveDailySecondSeries.length > 0 : todayRateHistoryRows().length > 0)
+    : rateHistoryForDisplay().length > 0;
+  btn.hidden = !hasData;
+  btn.title = t('clearRateHistory');
+  btn.setAttribute('aria-label', t('clearRateHistory'));
+}
+
+function formatChartAxisAmount(amount) {
+  const n = Number(amount) || 0;
+  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return formatCurrencyAmount(n);
+}
+
+function chartValueBounds(values) {
+  const RATE_CHART_Y_FLOOR = 1000;
+  const dataMin = Math.min(...values);
+  const dataMax = Math.max(...values);
+  const range = dataMax - dataMin;
+
+  if (range <= 0) {
+    const padAmt = Math.max(dataMin * 0.001, 1);
+    return { minV: dataMin - padAmt, maxV: dataMax + padAmt };
+  }
+
+  if (dataMin >= RATE_CHART_Y_FLOOR && range < dataMax * 0.08) {
+    const padAmt = Math.max(range * 0.25, 1);
+    return { minV: dataMin - padAmt, maxV: dataMax + padAmt };
+  }
+
+  const minV = Math.min(dataMin, RATE_CHART_Y_FLOOR);
+  const maxV = dataMax + range * 0.08;
+  return { minV, maxV };
+}
+
+function renderRateHistoryChart() {
+  const el = document.getElementById('rate-history-chart');
+  if (!el) return;
+  const periodList = document.querySelector('.rate-history-period');
+  if (periodList) periodList.setAttribute('aria-label', t('ratePeriodAria'));
+  const mode = currentRateHistoryPriceMode();
+  const period = currentRateHistoryPeriod();
+  const useLiveSecondChart = period === 'daily' && isLiveDailyApiMode();
+  const todayRows = period === 'daily' ? todaySavedRateRows() : todayRateHistoryRows();
+  const sorted = period === 'daily'
+    ? buildDailyChartSeries()
+    : aggregateRateHistoryForChart(rateHistoryForDisplay(), period);
+  const intradayList = sorted.length < 2 && !useLiveSecondChart
+    ? renderRateIntradayReadingsHtml(todayRows, period)
+    : '';
+
+  const minPoints = useLiveSecondChart ? 1 : 2;
+  if (sorted.length < minPoints) {
+    const emptyMsg = period === 'daily'
+      ? (useLiveSecondChart
+        ? t('rateIntradayCollecting')
+        : todayRows.length
+          ? t('rateIntradayCollecting')
+          : t('noRateHistoryChartDaily'))
+      : t('noRateHistoryChart');
+    el.innerHTML = `<p class="empty rate-chart-empty">${emptyMsg} (${ratePeriodLabel(period)} · ${rateHistoryModeLabel(mode)})</p>
+      ${intradayList}`;
+    if (period === 'daily' && isLiveDailyApiMode()) {
+      renderLiveDailyRateNow();
+    }
+    updateRateHistoryClearBtn();
     return;
   }
 
-  const w = 640;
-  const h = 220;
-  const pad = { top: 16, right: 16, bottom: 36, left: 56 };
-  const innerW = w - pad.left - pad.right;
-  const innerH = h - pad.top - pad.bottom;
-  const values = sorted.map((r) => r.value);
-  const minV = Math.min(...values);
-  const maxV = Math.max(...values);
-  const span = maxV - minV || 1;
-  const n = sorted.length;
-
-  const points = sorted.map((row, i) => {
-    const x = pad.left + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW);
-    const y = pad.top + innerH - ((row.value - minV) / span) * innerH;
-    return { x, y, row };
-  });
-
-  const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
-  const baseY = pad.top + innerH;
-  const areaPath = `${linePath} L${points[n - 1].x.toFixed(1)},${baseY} L${points[0].x.toFixed(1)},${baseY} Z`;
-
-  const yTicks = 4;
-  const yLabels = Array.from({ length: yTicks + 1 }, (_, i) => {
-    const v = minV + (span * i) / yTicks;
-    const y = pad.top + innerH - (i / yTicks) * innerH;
-    return `<text x="${pad.left - 8}" y="${y + 4}" class="chart-axis-label" text-anchor="end">${formatCurrencyAmount(v)}</text>
-      <line x1="${pad.left}" y1="${y}" x2="${w - pad.right}" y2="${y}" class="chart-grid-line"/>`;
-  }).join('');
-
-  const xLabelIndices = n <= 5
-    ? sorted.map((_, i) => i)
-    : [0, Math.floor((n - 1) / 2), n - 1];
-  const xLabels = xLabelIndices.map((i) => {
-    const p = points[i];
-    return `<text x="${p.x}" y="${h - 8}" class="chart-axis-label" text-anchor="middle">${formatRateHistoryDate(sorted[i])}</text>`;
-  }).join('');
-
-  const dots = points.map((p) =>
-    `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3.5" class="gold-rate-dot">
-      <title>${formatRateHistoryDate(p.row)}: ${formatCurrencyAmount(p.row.value)}/tola</title>
-    </circle>`
-  ).join('');
-
-  const latest = sorted[sorted.length - 1];
-  el.innerHTML = `
-    <div class="gold-rate-chart-wrap">
-      <svg class="gold-rate-chart-svg" viewBox="0 0 ${w} ${h}" role="img" aria-label="${t('goldRateChart')}">
-        ${yLabels}
-        <path d="${areaPath}" class="gold-rate-area"/>
-        <path d="${linePath}" class="gold-rate-line"/>
-        ${dots}
-        ${xLabels}
-      </svg>
-      <p class="rate-chart-caption">${t('latest')}: ${formatCurrencyAmount(latest.value)}/tola · ${formatRateHistoryDate(latest)}</p>
-    </div>`;
+  renderGoldPriceOrgChart(el, sorted, mode, period, intradayList);
 }
 
 function renderRateHistoryTable() {
   const historyEl = document.getElementById('rate-history');
   if (!historyEl) return;
-  historyEl.innerHTML = rateHistoryCache.length
-    ? `<table class="data-table"><thead><tr><th>${t('date')}</th><th>${t('perTolaCol')}</th><th>${t('perGramCol')}</th></tr></thead><tbody>
-      ${rateHistoryCache.map((row) => `<tr>
-        <td>${formatRateHistoryDate(row)}</td>
+  const period = currentRateHistoryPeriod();
+  const saved = period === 'daily'
+    ? [...todaySavedRateRows()].sort((a, b) => (b.updatedAt || b.date).localeCompare(a.updatedAt || a.date))
+    : [...rateHistoryForDisplay()].sort((a, b) => (b.updatedAt || b.date).localeCompare(a.updatedAt || a.date));
+  const title = period === 'daily' ? t('rateHistoryToday') : t('rateHistory');
+  const liveRow = period === 'daily' && isLiveDailyApiMode() && liveDailyCurrentTick
+    ? `<tr class="rate-row-live">
+        <td>${formatRateHistoryTableWhen(liveDailyCurrentTick)} · ${t('liveRateNow')}</td>
+        <td>${formatMoney(liveDailyCurrentTick.goldRatePerTola)}</td>
+        <td>${formatMoney(liveDailyCurrentTick.goldRatePerGram)}</td>
+      </tr>`
+    : '';
+  historyEl.innerHTML = saved.length || liveRow
+    ? `<h4 class="rate-history-table-title">${title}</h4>
+      <table class="data-table"><thead><tr><th>${t('date')}</th><th>${t('perTolaCol')}</th><th>${t('perGramCol')}</th></tr></thead><tbody>
+      ${liveRow}
+      ${saved.map((row) => `<tr>
+        <td>${formatRateHistoryTableWhen(row)}</td>
         <td>${formatMoney(row.goldRatePerTola)}</td>
         <td>${formatMoney(row.goldRatePerGram)}</td>
       </tr>`).join('')}
     </tbody></table>`
-    : `<p class="empty">${t('noRateHistory')}</p>`;
+    : `<p class="empty">${period === 'daily' ? t('noRateHistoryToday') : t('noRateHistory')}</p>`;
+  updateRateHistoryClearBtn();
 }
 
-async function persistDailyGoldRateSnapshot() {
-  if (!goldRateCache || goldRateCache <= 0) return;
+async function clearRateHistoryForCurrentMode() {
+  const mode = currentRateHistoryPriceMode();
+  if (!rateHistoryForDisplay().length && !liveDailyReadings.length) return;
+  if (!confirm(t('clearRateHistoryConfirm'))) return;
+  try {
+    const payload = await api(`/api/settings/rate-history?priceMode=${encodeURIComponent(mode)}`, {
+      method: 'DELETE'
+    });
+    rateHistoryCache = (payload.rateHistory || []).map(normalizeRateHistoryRow);
+    liveDailyReadings = liveDailyReadings.filter((row) => row.priceMode !== mode);
+    resetLiveDailySecondSeries();
+    liveDailyFlatAnchor = null;
+    renderRateHistoryChart();
+    renderRateHistoryTable();
+    toast(t('clearRateHistoryDone'));
+  } catch (err) {
+    toast(err.message);
+  }
+}
+
+async function persistDailyGoldRateSnapshot(priceMode = settingsPriceMode, rates = null) {
+  const tola = Number(rates?.goldRatePerTola ?? goldRateCache);
+  if (!tola || tola <= 0) return false;
+  const gram = Number(rates?.goldRatePerGram)
+    || Number((tola / TOLA_GRAMS).toFixed(2));
+  const mode = priceMode === 'api' ? 'api' : 'manual';
   try {
     const payload = await api('/api/settings/daily-gold-rate', {
       method: 'POST',
       body: JSON.stringify({
-        goldRatePerTola: goldRateCache,
-        goldRatePerGram: Number((goldRateCache / TOLA_GRAMS).toFixed(2))
+        goldRatePerTola: tola,
+        goldRatePerGram: gram,
+        priceMode: mode,
+        localDate: todayDateStr()
       })
     });
     if (Array.isArray(payload.rateHistory)) {
-      rateHistoryCache = payload.rateHistory;
-      renderRateHistoryChart();
-      renderRateHistoryTable();
+      rateHistoryCache = payload.rateHistory.map(normalizeRateHistoryRow);
+      hydrateLiveDailyReadingsFromCache();
     }
-  } catch (_) { /* optional background save */ }
+    return Boolean(payload.changed);
+  } catch (_) { /* background save */ }
+  return false;
+}
+
+function hasTodayRateReading(priceMode) {
+  const mode = priceMode === 'api' ? 'api' : 'manual';
+  const today = todayDateStr();
+  return rateHistoryForDisplay().some((row) =>
+    row.priceMode === mode && String(row.date || '').slice(0, 10) === today);
+}
+
+async function ensureTodayGoldRateInDatabase() {
+  const mode = settingsPriceMode === 'api' ? 'api' : 'manual';
+  if (goldRateCache <= 0 || hasTodayRateReading(mode)) return;
+  await persistDailyGoldRateSnapshot(mode);
+}
+
+function stopMetalRatePolling() {
+  if (metalRatePollTimer) {
+    clearInterval(metalRatePollTimer);
+    metalRatePollTimer = null;
+  }
+  flushSharedGraphTicks();
+}
+
+function syncMetalRatePolling() {
+  stopMetalRatePolling();
+  if (activeView !== 'settings' || currentRateHistoryPeriod() !== 'daily') return;
+  if (!isLiveDailyApiMode()) return;
+  loadSharedGoldRates().then(() => {
+    renderRateHistoryChart();
+    renderRateHistoryTable();
+    captureLiveDailyRate().catch(() => {});
+  }).catch(() => {
+    captureLiveDailyRate().catch(() => {});
+  });
+  metalRatePollTimer = setInterval(() => {
+    captureLiveDailyRate().catch(() => {});
+  }, METAL_RATE_POLL_MS);
+}
+
+async function seedTodayRateReading() {
+  await captureLiveDailyRate();
 }
 
 async function refreshAfterCurrencyChange(prevCurrency) {
@@ -459,6 +1394,13 @@ let settingsCache = {
   silverRatePerTola: 0
 };
 let rateHistoryCache = [];
+let liveDailyReadings = [];
+let liveDailyCurrentTick = null;
+let liveDailyFlatAnchor = null;
+let liveDailySecondSeries = [];
+let liveDailySecondSeq = 0;
+let metalRatePollTimer = null;
+const METAL_RATE_POLL_MS = 1000;
 let lastSaleBill = null;
 let activeView = 'pos';
 let posCart = [];
@@ -1514,7 +2456,9 @@ async function api(path, opts = {}) {
     throw new Error(data.error || 'Sign in required.');
   }
   if (!res.ok) throw new Error(data.error || 'Request failed');
-  if (isMutation && !isAuth) scheduleRefresh();
+  const skipRefresh = path.includes('/api/settings/daily-gold-rate')
+    || path.includes('/api/shared/gold-rates');
+  if (isMutation && !isAuth && !skipRefresh) scheduleRefresh();
   return data;
 }
 
@@ -1624,7 +2568,13 @@ async function updateMetalRates(settings) {
         silverEl.textContent =
           `Silver: ${formatCurrencyAmount(live.silver.perTola)}/tola · ${formatCurrencyAmount(live.silver.perGram)}/g`;
       }
-      await persistDailyGoldRateSnapshot();
+      const onDailySettings = activeView === 'settings' && currentRateHistoryPeriod() === 'daily';
+      if (!onDailySettings) {
+        await persistDailyGoldRateSnapshot('api', {
+          goldRatePerTola: goldRateCache,
+          goldRatePerGram: Number((goldRateCache / TOLA_GRAMS).toFixed(2))
+        });
+      }
     } catch (err) {
       if (bodyEl) {
         bodyEl.hidden = false;
@@ -1959,9 +2909,11 @@ async function loadSettings() {
     || (settings.silverRatePerGram
       ? Number((settings.silverRatePerGram * TOLA_GRAMS).toFixed(2))
       : 0);
-  rateHistoryCache = settings.rateHistory || [];
+  rateHistoryCache = (settings.rateHistory || []).map(normalizeRateHistoryRow);
+  await loadSharedGoldRates();
   refreshMetalPriceFields();
   await updateMetalRates(settings);
+  await ensureTodayGoldRateInDatabase();
 
   locationsCache = settings.locations || [];
   renderLocationDatalist();
@@ -1980,6 +2932,8 @@ async function loadSettings() {
 
   renderRateHistoryChart();
   renderRateHistoryTable();
+  renderLiveDailyRateNow();
+  syncMetalRatePolling();
   updateShopBranding();
 }
 
@@ -2012,6 +2966,7 @@ function showView(name) {
     initGoldCalculator();
     updateGoldCalculator();
   }
+  syncMetalRatePolling();
 }
 
 function cartLineName(line) {
@@ -3969,6 +4924,7 @@ document.getElementById('settings-form')?.addEventListener('submit', async (e) =
       refreshMetalPriceFields();
       updateGoldCalculator();
     }
+    syncMetalRatePolling();
     refreshDisplayPrices();
     toast(t('settingsSaved'));
   } catch (err) { toast(err.message); }
@@ -3978,6 +4934,47 @@ document.querySelector('#settings-form [name="goldRatePerGram"]')?.addEventListe
 document.querySelector('#settings-form [name="goldRatePerTola"]')?.addEventListener('input', syncSettingsGoldRateFromTola);
 document.querySelector('#settings-form [name="silverRatePerGram"]')?.addEventListener('input', syncSettingsSilverRateFromGram);
 document.querySelector('#settings-form [name="silverRatePerTola"]')?.addEventListener('input', syncSettingsSilverRateFromTola);
+document.getElementById('clear-rate-history-btn')?.addEventListener('click', clearRateHistoryForCurrentMode);
+document.querySelectorAll('.rate-history-period [data-rate-period]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.rate-history-period [data-rate-period]').forEach((b) => {
+      const active = b === btn;
+      b.classList.toggle('is-active', active);
+      b.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    if (btn.dataset.ratePeriod === 'daily') {
+      loadSharedGoldRates().then(() => {
+        renderRateHistoryChart();
+        renderRateHistoryTable();
+      }).catch(() => {});
+      syncMetalRatePolling();
+    } else {
+      stopMetalRatePolling();
+      liveDailyCurrentTick = null;
+      resetLiveDailySecondSeries();
+      liveDailyFlatAnchor = null;
+    }
+    renderLiveDailyRateNow();
+    renderRateHistoryChart();
+  });
+});
+document.querySelectorAll('#settings-form [name="priceMode"]').forEach((radio) => {
+  radio.addEventListener('change', () => {
+    if (!isLiveDailyApiMode()) {
+      liveDailyCurrentTick = null;
+      resetLiveDailySecondSeries();
+      liveDailyFlatAnchor = null;
+    }
+    loadSharedGoldRates().then(() => {
+      renderRateHistoryChart();
+      renderRateHistoryTable();
+    }).catch(() => {});
+    renderLiveDailyRateNow();
+    renderRateHistoryChart();
+    renderRateHistoryTable();
+    syncMetalRatePolling();
+  });
+});
 
 document.getElementById('language-select')?.addEventListener('change', (e) => {
   changeLanguage(e.target.value);
@@ -4055,6 +5052,11 @@ document.getElementById('new-category-input')?.addEventListener('keydown', (e) =
 });
 
 document.getElementById('theme-toggle')?.addEventListener('click', () => toast(t('comingSoon')));
+
+window.addEventListener('beforeunload', () => { flushSharedGraphTicks(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flushSharedGraphTicks();
+});
 
 async function initApp() {
   initDateDefaults();

@@ -11,6 +11,14 @@ const {
   normalizeShopName,
   LOCAL_DEV_USER_ID
 } = require('./lib/store');
+const {
+  readSharedRates,
+  appendSharedTick,
+  appendSharedTicks,
+  appendSharedHistory,
+  getSharedRatesForClient,
+  clearSharedRates
+} = require('./lib/shared-rates');
 const { getSupabase, checkSupabaseConnection } = require('./lib/supabase');
 const {
   normalizeUsername,
@@ -29,6 +37,17 @@ const {
   lookupDisplayNameFromDb
 } = require('./lib/auth');
 const { getLiveMetalRates, isMetalApiConfigured, normalizeMetalCurrency } = require('./lib/metal-rates');
+const { captureSharedGoldRateIfChanged, recordSharedApiGoldReading, displayToNpr, localDateStr } = require('./lib/capture-shared-gold-rate');
+
+const CRON_CAPTURE_PATH = '/api/cron/capture-gold-rate';
+
+function isCronAuthorized(req) {
+  const secret = String(process.env.CRON_SECRET || '').trim();
+  if (!secret) return false;
+  const auth = String(req.headers.authorization || '');
+  if (auth === `Bearer ${secret}`) return true;
+  return String(req.headers['x-cron-secret'] || '') === secret;
+}
 
 const app = express();
 const PORT = process.env.PORT || 3002;
@@ -50,6 +69,11 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 async function attachUser(req, res, next) {
+  if (req.path === CRON_CAPTURE_PATH && isCronAuthorized(req)) {
+    req.isCron = true;
+    return next();
+  }
+
   if (!req.path.startsWith('/api/') || PUBLIC_API_PATHS.has(req.path)) {
     return next();
   }
@@ -179,38 +203,59 @@ function normalizeRateHistoryEntry(entry) {
     goldRatePerTola,
     goldRatePerGram: Number(entry.goldRatePerGram)
       || Number((goldRatePerTola / TOLA_GRAMS).toFixed(2)),
+    priceMode: entry.priceMode === 'api' ? 'api' : 'manual',
     updatedAt
   };
 }
 
-function recordDailyGoldRateSnapshot(store, goldRatePerTola, goldRatePerGram) {
+function trimRateHistory(history) {
+  const byMode = { manual: [], api: [] };
+  history.forEach((row) => {
+    const mode = row.priceMode === 'api' ? 'api' : 'manual';
+    byMode[mode].push(row);
+  });
+  byMode.manual.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  byMode.api.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  return [...byMode.manual.slice(0, 500), ...byMode.api.slice(0, 500)]
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+function recordDailyGoldRateSnapshot(store, goldRatePerTola, goldRatePerGram, priceMode = 'manual', localDate) {
   const tola = Number(goldRatePerTola);
   if (!Number.isFinite(tola) || tola <= 0) return false;
 
-  const now = new Date().toISOString();
-  const today = now.slice(0, 10);
+  const mode = priceMode === 'api' ? 'api' : 'manual';
+  let now = new Date().toISOString();
+  const today = String(localDate || now.slice(0, 10)).slice(0, 10);
   const gram = Number(goldRatePerGram) || Number((tola / TOLA_GRAMS).toFixed(2));
   if (!Array.isArray(store.settings.rateHistory)) store.settings.rateHistory = [];
 
   const history = store.settings.rateHistory.map(normalizeRateHistoryEntry);
-  const idx = history.findIndex((row) => row.date === today);
-  const entry = {
+  const lastForMode = history
+    .filter((row) => row.priceMode === mode)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+
+  if (lastForMode
+    && lastForMode.goldRatePerTola === tola
+    && lastForMode.goldRatePerGram === gram) {
+    return false;
+  }
+
+  if (lastForMode) {
+    const lastT = new Date(lastForMode.updatedAt).getTime();
+    const minT = lastT + 1000;
+    if (Date.now() < minT) now = new Date(minT).toISOString();
+  }
+
+  history.push({
     date: today,
     goldRatePerTola: tola,
     goldRatePerGram: gram,
+    priceMode: mode,
     updatedAt: now
-  };
+  });
 
-  if (idx >= 0) {
-    const prev = history[idx];
-    if (prev.goldRatePerTola === tola && prev.goldRatePerGram === gram) return false;
-    history[idx] = entry;
-  } else {
-    history.push(entry);
-  }
-
-  history.sort((a, b) => b.date.localeCompare(a.date));
-  store.settings.rateHistory = history.slice(0, 90);
+  store.settings.rateHistory = trimRateHistory(history);
   return true;
 }
 
@@ -834,6 +879,16 @@ app.post('/api/auth/reset-password', asyncRoute(async (req, res) => {
   res.json({ ok: true, message: 'Password updated. You can log in now.' });
 }));
 
+app.get('/api/cron/capture-gold-rate', asyncRoute(async (req, res) => {
+  if (!req.isCron) {
+    return res.status(401).json({ error: 'Cron secret required.' });
+  }
+  const result = await captureSharedGoldRateIfChanged({
+    currency: req.query.currency
+  });
+  res.json(result);
+}));
+
 app.get('/api/metal-rates', asyncRoute(async (req, res) => {
   if (!isMetalApiConfigured()) {
     return res.status(503).json({
@@ -844,10 +899,50 @@ app.get('/api/metal-rates', asyncRoute(async (req, res) => {
   try {
     const currency = normalizeMetalCurrency(req.query.currency);
     const rates = await getLiveMetalRates(currency);
+    const tolaNpr = displayToNpr(rates.gold.perTola, currency);
+    const gramNpr = displayToNpr(rates.gold.perGram, currency)
+      || Number((tolaNpr / TOLA_GRAMS).toFixed(2));
+    if (tolaNpr > 0) {
+      await appendSharedHistory({
+        goldRatePerTola: tolaNpr,
+        goldRatePerGram: gramNpr,
+        priceMode: 'api',
+        localDate: localDateStr()
+      });
+    }
     res.json(rates);
   } catch (err) {
     res.status(502).json({ error: err.message || 'Could not fetch live metal rates.' });
   }
+}));
+
+app.get('/api/shared/gold-rates', asyncRoute(async (req, res) => {
+  const date = String(req.query.date || new Date().toISOString().slice(0, 10)).slice(0, 10);
+  const priceMode = req.query.priceMode === 'api' ? 'api' : 'manual';
+  const data = await getSharedRatesForClient({ date, priceMode });
+  res.json(data);
+}));
+
+app.post('/api/shared/gold-rates/tick', asyncRoute(async (req, res) => {
+  await appendSharedTick(req.body);
+  res.json({ ok: true });
+}));
+
+app.post('/api/shared/gold-rates/ticks', asyncRoute(async (req, res) => {
+  const ticks = Array.isArray(req.body.ticks) ? req.body.ticks : [];
+  const result = await appendSharedTicks(ticks);
+  res.json({ ok: true, count: result.count });
+}));
+
+app.post('/api/shared/gold-rates/history', asyncRoute(async (req, res) => {
+  const result = await appendSharedHistory(req.body);
+  res.json({ changed: result.changed, rateHistory: result.history });
+}));
+
+app.delete('/api/shared/gold-rates', asyncRoute(async (req, res) => {
+  const priceMode = req.query.priceMode === 'api' ? 'api' : 'manual';
+  const result = await clearSharedRates(priceMode);
+  res.json({ rateHistory: result.history });
 }));
 
 app.get('/api/reports', asyncRoute(async (req, res) => {
@@ -865,34 +960,45 @@ app.get('/api/summary', asyncRoute(async (req, res) => {
 app.get('/api/settings', asyncRoute(async (req, res) => {
   const store = await readStore(req.userId);
   const settings = normalizeSilverRates({ ...store.settings });
-  if (settings.goldRatePerTola > 0) {
-    const changed = recordDailyGoldRateSnapshot(
-      store,
-      settings.goldRatePerTola,
-      settings.goldRatePerGram
-    );
-    if (changed) await writeStore(store, req.userId);
+  if (settings.goldRatePerTola > 0 && settings.priceMode !== 'api') {
+    await appendSharedHistory({
+      goldRatePerTola: settings.goldRatePerTola,
+      goldRatePerGram: settings.goldRatePerGram,
+      priceMode: 'manual'
+    });
   }
+  const shared = await readSharedRates();
   res.json({
     ...settings,
     locations: getStoreLocations(store),
     itemCategories: getStoreItemCategories(store),
     goldRatePerGram: Number((settings.goldRatePerTola / TOLA_GRAMS).toFixed(2)),
-    rateHistory: store.settings.rateHistory || []
+    rateHistory: shared.history || []
   });
 }));
 
 app.post('/api/settings/daily-gold-rate', asyncRoute(async (req, res) => {
-  const store = await readStore(req.userId);
-  const tola = Number(req.body.goldRatePerTola ?? store.settings.goldRatePerTola);
+  const tola = Number(req.body.goldRatePerTola);
   const gram = Number(req.body.goldRatePerGram)
     || Number((tola / TOLA_GRAMS).toFixed(2));
+  const priceMode = req.body.priceMode === 'api' ? 'api' : 'manual';
   if (!Number.isFinite(tola) || tola < 0) {
     return res.status(400).json({ error: 'Gold rate must be a valid number.' });
   }
-  recordDailyGoldRateSnapshot(store, tola, gram);
-  await writeStore(store, req.userId);
-  res.json({ rateHistory: store.settings.rateHistory || [] });
+  const result = await appendSharedHistory({
+    goldRatePerTola: tola,
+    goldRatePerGram: gram,
+    priceMode,
+    localDate: req.body.localDate
+  });
+  const shared = await readSharedRates();
+  res.json({ changed: result.changed, rateHistory: shared.history || [] });
+}));
+
+app.delete('/api/settings/rate-history', asyncRoute(async (req, res) => {
+  const priceMode = req.query.priceMode === 'api' ? 'api' : 'manual';
+  const result = await clearSharedRates(priceMode);
+  res.json({ rateHistory: result.history });
 }));
 
 app.get('/api/settings/shop-name-available', asyncRoute(async (req, res) => {
@@ -912,11 +1018,11 @@ app.patch('/api/settings', asyncRoute(async (req, res) => {
       return res.status(400).json({ error: 'Gold rate must be a valid number.' });
     }
     store.settings.goldRatePerTola = newRate;
-    recordDailyGoldRateSnapshot(
-      store,
-      newRate,
-      Number((newRate / TOLA_GRAMS).toFixed(2))
-    );
+    await appendSharedHistory({
+      goldRatePerTola: newRate,
+      goldRatePerGram: Number((newRate / TOLA_GRAMS).toFixed(2)),
+      priceMode: 'manual'
+    });
   }
 
   if (req.body.shopName != null) {
@@ -976,11 +1082,12 @@ app.patch('/api/settings', asyncRoute(async (req, res) => {
   store.settings.goldRatePerGram = Number((store.settings.goldRatePerTola / TOLA_GRAMS).toFixed(2));
   normalizeSilverRates(store.settings);
   await writeStore(store, req.userId);
+  const shared = await readSharedRates();
   res.json({
     ...store.settings,
     locations: getStoreLocations(store),
     itemCategories: getStoreItemCategories(store),
-    rateHistory: store.settings.rateHistory || []
+    rateHistory: shared.history || []
   });
 }));
 

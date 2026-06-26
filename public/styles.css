@@ -2809,9 +2809,88 @@ th {
 
 .gold-heading { color: var(--gold-dark); }
 
+.rate-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 1.5rem 0 0.75rem;
+}
+
+.rate-history-head .rate-history-title {
+  margin: 0;
+}
+
+.rate-history-clear-btn {
+  flex-shrink: 0;
+  width: 2rem;
+  height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+}
+
+.rate-history-clear-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--danger, #b42318);
+}
+
 .rate-history-title {
   margin: 1.5rem 0 0.75rem;
   font-size: 0.95rem;
+}
+
+.rate-history-period {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 0.75rem;
+}
+
+.live-daily-rate-now {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 0.75rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: var(--radius, 8px);
+  border: 1px solid rgba(201, 162, 39, 0.45);
+  background: rgba(201, 162, 39, 0.1);
+}
+
+.live-daily-rate-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--gold-dark, #9a7b1a);
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(201, 162, 39, 0.2);
+}
+
+.live-daily-rate-price {
+  font-size: 1rem;
+  color: var(--text, #2c2a26);
+}
+
+.live-daily-rate-time {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.live-daily-rate-hint {
+  font-size: 0.75rem;
+  color: var(--muted);
+  width: 100%;
+}
+
+.rate-row-live {
+  background: rgba(201, 162, 39, 0.08);
+}
+
+.rate-row-live td {
+  font-weight: 600;
 }
 
 .rate-history-chart {
@@ -2831,6 +2910,609 @@ th {
   border: 1px solid var(--border);
   border-radius: var(--radius, 8px);
   padding: 0.75rem 1rem 0.5rem;
+  overflow: visible;
+}
+
+.gold-rate-chart-stock {
+  background: linear-gradient(180deg, var(--surface, #fff) 0%, var(--surface-2, #f8f6f2) 100%);
+  border-color: var(--border);
+}
+
+.stock-chart-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.35rem 1rem;
+  margin-bottom: 0.65rem;
+  padding-bottom: 0.55rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.stock-chart-header-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.stock-chart-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.stock-chart-price {
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--text, #2c2a26);
+}
+
+.stock-chart-unit {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--muted);
+  margin-left: 0.15rem;
+}
+
+.stock-chart-header-up .stock-chart-price { color: #15803d; }
+.stock-chart-header-down .stock-chart-price { color: #b91c1c; }
+
+.stock-chart-change {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+  padding: 0.2rem 0.55rem;
+  border-radius: 6px;
+}
+
+.stock-chart-change.is-up {
+  color: #15803d;
+  background: rgba(22, 163, 74, 0.12);
+}
+
+.stock-chart-change.is-down {
+  color: #b91c1c;
+  background: rgba(220, 38, 38, 0.1);
+}
+
+.stock-chart-change.is-flat {
+  color: var(--muted);
+  background: rgba(148, 163, 184, 0.12);
+}
+
+.stock-chart-arrow {
+  font-size: 0.65rem;
+}
+
+.stock-chart-change-pct {
+  opacity: 0.9;
+}
+
+.stock-live-price.is-up { color: #15803d; }
+.stock-live-price.is-down { color: #b91c1c; }
+
+.stock-live-change {
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 0.15rem 0.45rem;
+  border-radius: 5px;
+}
+
+.stock-chart-baseline {
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 6 4;
+  opacity: 0.55;
+}
+
+.stock-chart-baseline-label {
+  fill: var(--muted);
+  font-size: 9px;
+}
+
+.gold-rate-line-segment {
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+
+.gold-rate-line-up {
+  stroke: #16a34a;
+}
+
+.gold-rate-line-down {
+  stroke: #dc2626;
+}
+
+.gold-rate-line-flat {
+  stroke: #64748b;
+}
+
+.gold-rate-area-stock {
+  stroke: none;
+  opacity: 0.9;
+}
+
+.gold-rate-dot-live.gold-rate-dot-up {
+  fill: #16a34a;
+  stroke: #fff;
+}
+
+.gold-rate-dot-live.gold-rate-dot-down {
+  fill: #dc2626;
+  stroke: #fff;
+}
+
+.gold-rate-dot-live.gold-rate-dot-flat {
+  fill: #64748b;
+  stroke: #fff;
+}
+
+/* ── GoldPrice.org-style chart ── */
+.goldprice-chart {
+  background: #fff;
+  border: 1px solid #e8e4dc;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 2px 12px rgba(44, 42, 38, 0.06);
+}
+
+.goldprice-chart-header {
+  padding: 1rem 1.15rem 0.85rem;
+  border-bottom: 1px solid #f0ebe0;
+  background: linear-gradient(180deg, #fffdf8 0%, #fff 100%);
+}
+
+.goldprice-header-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem 1.25rem;
+  margin-bottom: 0.65rem;
+}
+
+.goldprice-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.goldprice-icon {
+  color: #d4af37;
+  font-size: 1.1rem;
+  line-height: 1;
+  text-shadow: 0 0 8px rgba(212, 175, 55, 0.45);
+}
+
+.goldprice-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: #2c2a26;
+  text-transform: uppercase;
+}
+
+.goldprice-sub {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #8a8478;
+  margin-top: 0.1rem;
+}
+
+.goldprice-quote {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.65rem;
+}
+
+.goldprice-value {
+  font-size: 1.85rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: #2c2a26;
+  line-height: 1.1;
+}
+
+.goldprice-unit {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #8a8478;
+}
+
+.goldprice-change {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  padding: 0.2rem 0.55rem;
+  border-radius: 5px;
+}
+
+.goldprice-quote.is-up .goldprice-change {
+  color: #15803d;
+  background: rgba(22, 163, 74, 0.1);
+}
+
+.goldprice-quote.is-down .goldprice-change {
+  color: #b91c1c;
+  background: rgba(220, 38, 38, 0.08);
+}
+
+.goldprice-quote.is-flat .goldprice-change {
+  color: #64748b;
+  background: rgba(100, 116, 139, 0.1);
+}
+
+.goldprice-arrow {
+  font-size: 0.65rem;
+}
+
+.goldprice-pct {
+  opacity: 0.9;
+}
+
+.goldprice-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  color: #6b6560;
+}
+
+.goldprice-stat em {
+  font-style: normal;
+  font-weight: 700;
+  color: #8a8478;
+  margin-right: 0.25rem;
+}
+
+.goldprice-updated {
+  margin-left: auto;
+}
+
+.goldprice-canvas-wrap {
+  padding: 0.25rem 0.5rem 0;
+  background: #faf9f7;
+}
+
+.goldprice-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 260px;
+}
+
+.gp-bg {
+  fill: #faf9f7;
+}
+
+.gp-hgrid {
+  stroke: #ebe6dc;
+  stroke-width: 1;
+}
+
+.gp-vgrid {
+  stroke: #f0ebe0;
+  stroke-width: 1;
+}
+
+.gp-y-label {
+  fill: #8a8478;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.gp-x-label {
+  fill: #8a8478;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.gp-area {
+  stroke: none;
+}
+
+.gp-line {
+  fill: none;
+  stroke: #c9a227;
+  stroke-width: 2.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.gp-live-dot {
+  fill: #d4af37;
+  stroke: #fff;
+  stroke-width: 2.5;
+}
+
+.gp-live-dot.is-up { fill: #16a34a; }
+.gp-live-dot.is-down { fill: #dc2626; }
+
+.gp-live-pulse {
+  fill: none;
+  stroke: #d4af37;
+  stroke-width: 1.5;
+  opacity: 0.45;
+  transform-origin: center;
+  transform-box: fill-box;
+  animation: goldprice-pulse 2s ease-out infinite;
+}
+
+.gp-live-pulse.is-up { stroke: #16a34a; }
+.gp-live-pulse.is-down { stroke: #dc2626; }
+
+@keyframes goldprice-pulse {
+  0% { transform: scale(0.55); opacity: 0.55; }
+  100% { transform: scale(1.75); opacity: 0; }
+}
+
+.goldprice-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.35rem;
+  padding: 0.5rem 1.15rem 0.75rem;
+  font-size: 0.72rem;
+  color: #8a8478;
+  border-top: 1px solid #f0ebe0;
+  background: #fff;
+}
+
+.goldprice-powered {
+  font-weight: 600;
+  color: #b8962e;
+}
+
+.goldprice-chart .rate-intraday-readings {
+  margin: 0 1rem 1rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed #ebe6dc;
+}
+
+.goldprice-live-banner {
+  background: linear-gradient(180deg, #fffdf8 0%, #fff 100%) !important;
+  border-color: #e8e4dc !important;
+}
+
+.goldprice-live-banner .live-daily-rate-badge {
+  background: rgba(201, 162, 39, 0.15);
+  color: #9a7b1a;
+}
+
+.goldprice-live-banner .live-daily-rate-time,
+.goldprice-live-banner .live-daily-rate-hint {
+  color: #8a8478;
+}
+
+/* Legacy stock chart helpers (weekly/monthly table dots) */
+.stock-exchange-chart {
+  background: #131722;
+  border: 1px solid #2a2e39;
+  border-radius: 10px;
+  overflow: hidden;
+  color: #d1d4dc;
+}
+
+.stock-exchange-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1.25rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #2a2e39;
+  background: #1e222d;
+}
+
+.stock-exchange-ticker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.stock-exchange-symbol {
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #f0b90b;
+}
+
+.stock-exchange-sub {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #787b86;
+}
+
+.stock-exchange-quote {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.75rem;
+}
+
+.stock-exchange-last {
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.stock-exchange-quote.is-up .stock-exchange-last { color: #26a69a; }
+.stock-exchange-quote.is-down .stock-exchange-last { color: #ef5350; }
+.stock-exchange-quote.is-flat .stock-exchange-last { color: #d1d4dc; }
+
+.stock-exchange-chg {
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.stock-exchange-quote.is-up .stock-exchange-chg { color: #26a69a; }
+.stock-exchange-quote.is-down .stock-exchange-chg { color: #ef5350; }
+
+.stock-exchange-ohlc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 1rem;
+  margin-left: auto;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: #787b86;
+}
+
+.stock-exchange-ohlc em {
+  font-style: normal;
+  font-weight: 700;
+  color: #9598a1;
+  margin-right: 0.2rem;
+}
+
+.stock-exchange-canvas-wrap {
+  padding: 0.35rem 0.5rem 0;
+}
+
+.stock-exchange-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 280px;
+}
+
+.stock-exchange-bg {
+  fill: #131722;
+}
+
+.stock-hgrid {
+  stroke: #2a2e39;
+  stroke-width: 1;
+}
+
+.stock-vgrid {
+  stroke: #1e222d;
+  stroke-width: 1;
+}
+
+.stock-y-label {
+  fill: #787b86;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.stock-time-label {
+  fill: #787b86;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.stock-open-line {
+  stroke: #787b86;
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+  opacity: 0.5;
+}
+
+.stock-price-line {
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: 0.85;
+}
+
+.stock-price-line.is-up { stroke: #26a69a; }
+.stock-price-line.is-down { stroke: #ef5350; }
+.stock-price-line.is-flat { stroke: #787b86; }
+
+.stock-price-tag {
+  stroke: none;
+}
+
+.stock-price-tag.is-up { fill: #26a69a; }
+.stock-price-tag.is-down { fill: #ef5350; }
+.stock-price-tag.is-flat { fill: #434651; }
+
+.stock-price-tag-text {
+  fill: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.stock-exchange-area {
+  stroke: none;
+}
+
+.stock-exchange-chart .gold-rate-line-up {
+  stroke: #26a69a;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.stock-exchange-chart .gold-rate-line-down {
+  stroke: #ef5350;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.stock-exchange-chart .gold-rate-line-flat {
+  stroke: #434651;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.stock-last-dot {
+  stroke: #131722;
+  stroke-width: 2;
+}
+
+.stock-last-dot.is-up { fill: #26a69a; }
+.stock-last-dot.is-down { fill: #ef5350; }
+.stock-last-dot.is-flat { fill: #787b86; }
+
+.stock-exchange-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.35rem;
+  padding: 0.45rem 1rem 0.65rem;
+  font-size: 0.7rem;
+  color: #787b86;
+  border-top: 1px solid #2a2e39;
+}
+
+.stock-exchange-live-banner {
+  background: #1e222d !important;
+  border-color: #2a2e39 !important;
+  color: #d1d4dc;
+}
+
+.stock-exchange-live-banner .live-daily-rate-badge {
+  background: rgba(240, 185, 11, 0.15);
+  color: #f0b90b;
+}
+
+.stock-exchange-live-banner .live-daily-rate-time,
+.stock-exchange-live-banner .live-daily-rate-hint {
+  color: #787b86;
+}
+
+.stock-exchange-chart + .rate-intraday-readings,
+.stock-exchange-chart .rate-intraday-readings {
+  margin: 0.75rem 1rem 1rem;
+  color: #d1d4dc;
 }
 
 .gold-rate-chart-svg {
@@ -2838,6 +3520,20 @@ th {
   width: 100%;
   max-width: 640px;
   height: auto;
+  overflow: visible;
+}
+
+.chart-axis-label-y {
+  font-size: 10px;
+}
+
+.chart-point-label {
+  fill: var(--text, #2c2a26);
+  font-size: 10px;
+  font-weight: 600;
+  paint-order: stroke;
+  stroke: var(--surface-2, #f8f6f2);
+  stroke-width: 3px;
 }
 
 .chart-grid-line {
@@ -2859,6 +3555,15 @@ th {
   stroke-linecap: round;
 }
 
+.gold-rate-line-step {
+  stroke-linejoin: miter;
+  stroke-linecap: square;
+}
+
+.gold-rate-area-step {
+  opacity: 0.85;
+}
+
 .gold-rate-area {
   fill: rgba(201, 162, 39, 0.12);
   stroke: none;
@@ -2870,11 +3575,65 @@ th {
   stroke-width: 1.5;
 }
 
+.gold-rate-dot-up {
+  fill: var(--success, #2d6a4f);
+}
+
+.gold-rate-dot-down {
+  fill: var(--danger, #b42318);
+}
+
+.gold-rate-dot-live {
+  fill: var(--gold, #c9a227);
+  stroke: var(--gold-dark, #9a7b1a);
+  stroke-width: 2;
+}
+
+.gold-rate-dot-flat {
+  fill: var(--muted, #8a8478);
+}
+
+.rate-chart-compare {
+  font-weight: 600;
+}
+
+.rate-chart-compare.is-up {
+  color: var(--success, #2d6a4f);
+}
+
+.rate-chart-compare.is-down {
+  color: var(--danger, #b42318);
+}
+
+.rate-chart-compare.is-flat {
+  color: var(--muted, #8a8478);
+}
+
 .rate-chart-caption {
   margin: 0.5rem 0 0;
   font-size: 0.8rem;
-  color: var(--muted);
+  color: var(--text, #2c2a26);
   text-align: center;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.rate-intraday-readings {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--border);
+}
+
+.rate-intraday-title,
+.rate-history-table-title {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.rate-intraday-table {
+  font-size: 0.85rem;
 }
 
 /* ── Expenses ── */
