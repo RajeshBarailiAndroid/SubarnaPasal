@@ -2431,7 +2431,6 @@ th {
 .order-group-dot-progress { background: #7b1fa2; }
 .order-group-dot-ready { background: var(--success); }
 .order-group-dot-completed { background: #1565c0; }
-.order-group-dot-cancelled { background: var(--danger); }
 .order-group-dot-other { background: #e65100; }
 
 .order-group-count {
@@ -3954,7 +3953,7 @@ th {
 }
 
 .options-cell {
-  min-width: 160px;
+  min-width: 140px;
 }
 
 .order-cart-btn {

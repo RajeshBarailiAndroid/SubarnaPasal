@@ -1456,8 +1456,7 @@ const ORDER_GROUPS = [
     statuses: ['pending', 'confirmed', 'progress']
   },
   { id: 'ready', labelKey: 'orderReady', statuses: ['ready'] },
-  { id: 'completed', labelKey: 'orderCompleted', statuses: ['completed'] },
-  { id: 'cancelled', labelKey: 'orderCancelled', statuses: ['cancelled'] }
+  { id: 'completed', labelKey: 'orderCompleted', statuses: ['completed'] }
 ];
 
 function orderGroupIdForStatus(status) {
@@ -2629,10 +2628,6 @@ function orderStatusBadge(status) {
   return `<span class="badge order-${cls}">${t(key)}</span>`;
 }
 
-function orderDeleteButton(id) {
-  return `<button type="button" class="link-btn danger" data-order-delete="${id}">${t('delete')}</button>`;
-}
-
 function orderActionButtons(order) {
   const actions = [];
   const id = order.id;
@@ -2656,15 +2651,11 @@ function orderActionButtons(order) {
   if (['pending', 'confirmed', 'progress', 'ready'].includes(order.status)) {
     actions.push(`<button type="button" class="link-btn" data-order-action="completed" data-order-id="${id}">${t('completeOrder')}</button>`);
     actions.push(`<button type="button" class="link-btn danger" data-order-action="cancelled" data-order-id="${id}">${t('cancelOrder')}</button>`);
-    actions.push(orderDeleteButton(id));
+    actions.push(`<button type="button" class="link-btn danger" data-order-delete="${id}">${t('delete')}</button>`);
   }
   if (order.status === 'completed') {
     actions.push(`<button type="button" class="link-btn order-option-btn" data-order-action="ready" data-order-revert="completed" data-order-id="${id}">${t('orderReady')}</button>`);
     actions.push(`<button type="button" class="link-btn order-option-btn" data-order-action="progress" data-order-revert="completed" data-order-id="${id}">${t('orderProgress')}</button>`);
-    actions.push(orderDeleteButton(id));
-  }
-  if (order.status === 'cancelled') {
-    actions.push(orderDeleteButton(id));
   }
   return actions.join('');
 }
@@ -5088,17 +5079,9 @@ document.getElementById('orders-content')?.addEventListener('click', async (e) =
     if (actionBtn.dataset.orderRevert === 'completed' && !confirm(t('orderStatusRevertConfirm'))) return;
     try { await updateOrderStatus(actionBtn.dataset.orderId, actionBtn.dataset.orderAction); } catch (err) { toast(err.message); }
   }
-  if (deleteBtn?.dataset.orderDelete) {
-    const orderId = deleteBtn.dataset.orderDelete;
-    const order = ordersAllCache.find((o) => o.id === orderId);
-    const confirmMsg = order?.status === 'completed'
-      ? t('deleteCompletedOrderConfirm')
-      : t('deleteOrderConfirm');
-    if (!confirm(confirmMsg)) return;
+  if (deleteBtn?.dataset.orderDelete && confirm(t('deleteOrderConfirm'))) {
     try {
-      await api(`/api/orders/${orderId}`, { method: 'DELETE' });
-      ordersAllCache = ordersAllCache.filter((o) => o.id !== orderId);
-      renderOrdersView();
+      await api(`/api/orders/${deleteBtn.dataset.orderDelete}`, { method: 'DELETE' });
       toast(t('orderDeleted'));
     } catch (err) { toast(err.message); }
   }
