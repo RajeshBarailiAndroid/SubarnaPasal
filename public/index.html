@@ -52,10 +52,6 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2"/><path d="M1 10h22"/></svg>
             <span data-i18n="navExpenses">Expenses</span>
           </button>
-          <button type="button" class="nav-btn" data-view="users" id="nav-users-btn" hidden>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-            <span data-i18n="navUsers">User Management</span>
-          </button>
         </nav>
         <div class="sidebar-footer">
           <div class="metal-rates">
@@ -89,26 +85,30 @@
 
             <section class="pos-block">
               <h2 class="pos-block-title" data-i18n="customerSection">Customer</h2>
-              <div class="search-field">
-                <svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-                <input type="search" id="pos-customer-search" data-i18n-placeholder="posCustomerSearch" placeholder="Search existing customer..." autocomplete="off" />
-                <div id="customer-suggestions" class="customer-suggestions" hidden></div>
+              <div class="pos-customer-toolbar">
+                <div class="search-field pos-customer-search-wrap">
+                  <svg class="field-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                  <input type="search" id="pos-customer-search" data-i18n-placeholder="posCustomerSearch" placeholder="Search existing customer..." autocomplete="off" />
+                  <div id="customer-suggestions" class="customer-suggestions" hidden></div>
+                </div>
+                <button type="button" class="btn btn-outline btn-xs add-customer-pos-btn" id="add-customer-btn">
+                  <span data-i18n="addCustomer">+ Add New Customer</span>
+                </button>
               </div>
-              <div class="pos-customer-fields">
-                <label class="pos-customer-label" id="pos-customer-name-wrap">
-                  <span data-i18n="customerNameRequired">Customer name *</span>
-                  <input type="text" id="pos-customer-name" data-i18n-placeholder="enterCustomerName" placeholder="Enter customer name" required autocomplete="name" aria-describedby="pos-customer-name-error" />
-                  <span id="pos-customer-name-error" class="field-error" hidden role="alert"></span>
-                </label>
-                <label class="pos-customer-label">
-                  <span data-i18n="customerPhone">Phone</span>
-                  <input type="tel" id="pos-customer-phone" data-i18n-placeholder="customerPhonePlaceholder" placeholder="(555) 123-4567" autocomplete="tel" />
-                </label>
+              <div id="pos-customer-display" class="pos-customer-display" hidden>
+                <div class="pos-customer-display-row">
+                  <span class="pos-customer-display-label" data-i18n="customerName">Customer name</span>
+                  <strong id="pos-customer-display-name"></strong>
+                </div>
+                <div class="pos-customer-display-row">
+                  <span class="pos-customer-display-label" data-i18n="customerPhone">Phone</span>
+                  <strong id="pos-customer-display-phone">—</strong>
+                </div>
+                <div class="pos-customer-display-row">
+                  <span class="pos-customer-display-label" data-i18n="address">Address</span>
+                  <strong id="pos-customer-display-address">—</strong>
+                </div>
               </div>
-              <button type="button" class="btn btn-outline btn-xs add-customer-pos-btn" id="add-customer-btn">
-                <span data-i18n="addCustomer">+ Add New Customer</span>
-              </button>
-              <div id="selected-customer" class="selected-customer" hidden></div>
             </section>
 
             <section class="pos-block">
@@ -188,21 +188,16 @@
 
           <!-- Inventory -->
           <section id="view-inventory" class="view" hidden>
-            <div class="page-topbar">
-              <button type="button" class="btn btn-outline btn-icon" id="inv-theme-toggle" title="Theme">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-              </button>
-            </div>
             <header class="page-header">
               <div class="page-header-text">
                 <h1 data-i18n="invPageTitle">Inventory Management</h1>
                 <p class="page-subtitle" data-i18n="invPageDesc">Track and manage your gold ornament stock.</p>
               </div>
               <div class="page-header-actions">
-                <button type="button" class="btn btn-outline btn-icon" id="refresh-inventory" title="Refresh">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                <button type="button" class="btn btn-outline btn-sm btn-icon" id="refresh-inventory" data-i18n-title="refreshList" title="Refresh List" aria-label="Refresh inventory list">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                 </button>
-                <button type="button" class="btn btn-gold" id="add-item-btn">
+                <button type="button" class="btn btn-gold btn-sm" id="add-item-btn">
                   <span data-i18n="addNewItem">+ Add New Item</span>
                 </button>
               </div>
@@ -357,36 +352,6 @@
             </article>
           </section>
 
-          <!-- User Management -->
-          <section id="view-users" class="view" hidden>
-            <header class="page-header">
-              <div class="page-header-text">
-                <h1 data-i18n="usersPageTitle">User Management</h1>
-                <p class="page-subtitle" data-i18n="usersPageDesc">Approve, deny, or manage user roles and accounts.</p>
-              </div>
-              <div class="page-header-actions">
-                <button type="button" class="btn btn-outline" id="refresh-users">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-                  <span data-i18n="refreshUsers">Refresh Users</span>
-                </button>
-              </div>
-            </header>
-            <div class="filter-bar stacked">
-              <input type="search" id="search-users" data-i18n-placeholder="searchUsers" placeholder="Search by name or email..." />
-              <input type="search" id="filter-users" data-i18n-placeholder="filterByName" placeholder="Filter by name..." />
-            </div>
-            <article class="data-card">
-              <div id="users-table" class="table-wrap"></div>
-              <div class="table-footer">
-                <span id="users-row-count" data-i18n="rowsSelected">0 of 0 row(s) selected</span>
-                <div class="pagination">
-                  <button type="button" class="btn btn-outline btn-sm" disabled data-i18n="previous">Previous</button>
-                  <button type="button" class="btn btn-outline btn-sm" disabled data-i18n="next">Next</button>
-                </div>
-              </div>
-            </article>
-          </section>
-
           <!-- Settings -->
           <section id="view-settings" class="view" hidden>
             <header class="page-header">
@@ -523,10 +488,9 @@
           <button type="button" class="icon-btn" id="close-customer-modal">×</button>
         </header>
         <div class="form-grid">
-          <label class="span-2"><span data-i18n="name">Name</span><input name="name" required /></label>
-          <label><span data-i18n="customerPhone">Phone</span><input name="phone" type="tel" data-i18n-placeholder="customerPhonePlaceholder" placeholder="(555) 123-4567" /></label>
-          <label><span data-i18n="email">Email</span><input name="email" type="email" /></label>
-          <label class="span-2"><span data-i18n="address">Address</span><input name="address" /></label>
+          <label class="span-2"><span data-i18n="customerNameRequired">Customer name *</span><input name="name" required autocomplete="name" /></label>
+          <label class="span-2"><span data-i18n="customerPhone">Phone</span><input name="phone" type="tel" data-i18n-placeholder="customerPhonePlaceholder" placeholder="(555) 123-4567" autocomplete="tel" /></label>
+          <label class="span-2"><span data-i18n="address">Address</span><input name="address" autocomplete="street-address" /></label>
         </div>
         <footer class="modal-foot">
           <button type="button" class="btn" id="cancel-customer-modal" data-i18n="cancel">Cancel</button>

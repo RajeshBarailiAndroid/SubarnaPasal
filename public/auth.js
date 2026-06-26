@@ -6,22 +6,6 @@ let accountDisplayName = '';
 const AUTH_EMAIL_DOMAIN = 'subarnapasal.app';
 const LOGIN_PATH = '/login.html';
 const APP_PATH = '/';
-const ADMIN_EMAIL = 'rajeshsurunga@gmail.com';
-
-function getUserContactEmail(user) {
-  if (!user) return '';
-  const meta = user.user_metadata || {};
-  return String(meta.contact_email || user.email || '').trim().toLowerCase();
-}
-
-function isAdminSession(session) {
-  if (!session?.user) return false;
-  return getUserContactEmail(session.user) === ADMIN_EMAIL.toLowerCase();
-}
-
-function isAdminUser() {
-  return isAdminSession({ user: signedInUser });
-}
 
 function isLoginPage() {
   return /\/login\.html$/i.test(window.location.pathname);
@@ -327,7 +311,6 @@ window.isForgotPasswordPage = isForgotPasswordPage;
 window.redirectToLogin = redirectToLogin;
 window.redirectToApp = redirectToApp;
 window.clearAuthErrors = clearAuthErrors;
-window.isAdminUser = isAdminUser;
 window.authToast = authToast;
 window.showAuthError = showAuthError;
 window.revealAppShell = revealAppShell;
@@ -337,7 +320,6 @@ function updateAuthUI(session) {
 
   signedInUser = session?.user || null;
   const settingsLogoutBtn = document.getElementById('settings-logout-btn');
-  const usersNavBtn = document.querySelector('.nav-btn[data-view="users"]');
 
   if (session?.user) {
     renderAccountDisplay(session);
@@ -346,8 +328,6 @@ function updateAuthUI(session) {
     settingsLogoutBtn.hidden = true;
     accountDisplayName = '';
   }
-
-  if (usersNavBtn) usersNavBtn.hidden = !isAdminSession(session);
 
   const canEdit = Boolean(session?.user) || !authEnabled;
   const bootstrapping = document.body.classList.contains('auth-pending');

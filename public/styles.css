@@ -627,41 +627,48 @@ body.auth-signed-out .toast {
   white-space: nowrap;
 }
 
-.pos-customer-fields {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.65rem;
-  margin: 0.75rem 0 0.5rem;
+.pos-customer-toolbar {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  flex-wrap: wrap;
 }
 
-.pos-customer-label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
+.pos-customer-search-wrap {
+  flex: 1;
+  min-width: 180px;
+}
+
+.pos-customer-display {
+  margin-top: 0.75rem;
+  padding: 0.75rem 0.85rem;
+  background: rgba(212, 175, 55, 0.08);
+  border: 1px solid rgba(212, 175, 55, 0.3);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 0.5rem;
+}
+
+.pos-customer-display[hidden] {
+  display: none !important;
+}
+
+.pos-customer-display-row {
+  display: grid;
+  grid-template-columns: minmax(0, 7.5rem) 1fr;
+  gap: 0.65rem;
+  align-items: baseline;
+  font-size: 0.88rem;
+}
+
+.pos-customer-display-label {
+  color: var(--muted);
   font-size: 0.82rem;
 }
 
-.pos-customer-label:first-child {
-  grid-column: 1 / -1;
-}
-
-.pos-customer-label input {
-  width: 100%;
-  padding: 0.65rem 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  font: inherit;
-}
-
-.pos-customer-label input:required {
-  border-color: rgba(212, 175, 55, 0.55);
-}
-
-.pos-customer-label input.is-invalid,
-.pos-customer-label.has-error input {
-  border-color: var(--danger);
-  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.12);
+.pos-customer-display-row strong {
+  font-weight: 600;
+  word-break: break-word;
 }
 
 .field-error {
@@ -1065,6 +1072,16 @@ th {
 }
 
 .panel-head-row h2 { margin: 0; }
+
+.panel-head-row > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.panel-head-row .panel-desc {
+  margin: 0;
+}
 
 .orders-list { display: flex; flex-direction: column; gap: 0.75rem; }
 
@@ -2050,7 +2067,7 @@ th {
   min-width: 40px;
 }
 
-.page-header-actions .btn-sm.btn-icon svg {
+.page-header-actions .btn-icon svg {
   width: 16px;
   height: 16px;
 }

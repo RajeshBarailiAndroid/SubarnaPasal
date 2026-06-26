@@ -254,7 +254,6 @@ const views = {
   customers: { showAddItem: false, posMode: false },
   reports: { showAddItem: false, posMode: false },
   expenses: { showAddItem: false, posMode: false },
-  users: { showAddItem: false, posMode: false },
   settings: { showAddItem: false, posMode: false }
 };
 
@@ -729,9 +728,6 @@ async function loadSettings() {
 }
 
 function showView(name) {
-  if (name === 'users' && typeof isAdminUser === 'function' && !isAdminUser()) {
-    name = 'pos';
-  }
   activeView = name;
   document.querySelectorAll('.view').forEach((v) => { v.hidden = true; });
   const viewEl = document.getElementById(`view-${name}`);
@@ -765,71 +761,62 @@ function cartLineName(line) {
 }
 
 function getSaleCustomerName() {
-  return document.getElementById('pos-customer-name')?.value.trim()
-    || selectedCustomer?.name
-    || document.getElementById('pos-customer-search')?.value.trim()
-    || '';
+  return String(selectedCustomer?.name || '').trim();
 }
 
 function getSaleCustomerPhone() {
-  return document.getElementById('pos-customer-phone')?.value.trim()
-    || selectedCustomer?.phone
-    || '';
+  return String(selectedCustomer?.phone || '').trim();
 }
 
-function clearPosCustomerNameError() {
-  const input = document.getElementById('pos-customer-name');
-  const error = document.getElementById('pos-customer-name-error');
-  const wrap = document.getElementById('pos-customer-name-wrap');
-  if (input) input.classList.remove('is-invalid');
-  if (wrap) wrap.classList.remove('has-error');
-  if (error) {
-    error.hidden = true;
-    error.textContent = '';
+function renderPosCustomerDisplay() {
+  const box = document.getElementById('pos-customer-display');
+  const nameEl = document.getElementById('pos-customer-display-name');
+  const phoneEl = document.getElementById('pos-customer-display-phone');
+  const addressEl = document.getElementById('pos-customer-display-address');
+  const name = getSaleCustomerName();
+  const phone = getSaleCustomerPhone();
+  const address = String(selectedCustomer?.address || '').trim();
+  if (!box) return;
+  if (!name) {
+    box.hidden = true;
+    if (nameEl) nameEl.textContent = '';
+    if (phoneEl) phoneEl.textContent = '—';
+    if (addressEl) addressEl.textContent = '—';
+    return;
   }
-}
-
-function showPosCustomerNameError() {
-  const input = document.getElementById('pos-customer-name');
-  const error = document.getElementById('pos-customer-name-error');
-  const wrap = document.getElementById('pos-customer-name-wrap');
-  if (input) {
-    input.classList.add('is-invalid');
-    input.focus();
-  }
-  if (wrap) wrap.classList.add('has-error');
-  if (error) {
-    error.textContent = t('customerNamePrompt');
-    error.hidden = false;
-  }
+  box.hidden = false;
+  if (nameEl) nameEl.textContent = name;
+  if (phoneEl) phoneEl.textContent = phone || '—';
+  if (addressEl) addressEl.textContent = address || '—';
 }
 
 function ensurePosCustomerName() {
-  const name = getSaleCustomerName();
-  if (name) {
-    clearPosCustomerNameError();
-    return true;
-  }
-  showPosCustomerNameError();
+  if (getSaleCustomerName()) return true;
+  toast(t('customerNamePrompt'));
   return false;
 }
 
-function applyPosCustomer(customer) {
-  selectedCustomer = customer;
-  const nameInput = document.getElementById('pos-customer-name');
-  const phoneInput = document.getElementById('pos-customer-phone');
-  const input = document.getElementById('pos-customer-search');
-  const badge = document.getElementById('selected-customer');
+function resetPosCustomer() {
+  selectedCustomer = null;
+  const search = document.getElementById('pos-customer-search');
+  if (search) search.value = '';
   const box = document.getElementById('customer-suggestions');
-  if (nameInput) nameInput.value = customer.name || '';
-  if (phoneInput) phoneInput.value = customer.phone || '';
-  if (input) input.value = customer.name || '';
-  clearPosCustomerNameError();
   if (box) { box.hidden = true; box.innerHTML = ''; }
-  if (badge) {
-    badge.hidden = false;
-    badge.innerHTML = `<strong>${customer.name}</strong>${customer.phone ? ` · ${customer.phone}` : ''}`;
-  }
+  renderPosCustomerDisplay();
+  renderSaleCustomer();
+}
+
+function applyPosCustomer(customer) {
+  selectedCustomer = {
+    name: String(customer?.name || '').trim(),
+    phone: String(customer?.phone || '').trim(),
+    address: String(customer?.address || '').trim()
+  };
+  const search = document.getElementById('pos-customer-search');
+  const box = document.getElementById('customer-suggestions');
+  if (search) search.value = '';
+  if (box) { box.hidden = true; box.innerHTML = ''; }
+  renderPosCustomerDisplay();
   renderSaleCustomer();
 }
 
@@ -1698,40 +1685,6 @@ function loadExpenses() {
     : `<table class="data-table"><tbody><tr class="empty-row"><td colspan="5">${t('noResults')}</td></tr></tbody></table>`;
 }
 
-function loadUsers() {
-  const defaults = [
-    { name: 'Admin User', email: 'admin@suvarnapasal.com', registeredAt: '2026-01-15', status: 'active', role: 'admin' },
-    { name: 'Staff Member', email: 'staff@suvarnapasal.com', registeredAt: '2026-03-20', status: 'pending', role: 'staff' }
-  ];
-  const search = document.getElementById('search-users')?.value.trim().toLowerCase() || '';
-  const filter = document.getElementById('filter-users')?.value.trim().toLowerCase() || '';
-  let users = localData('subarnapasal.users', defaults);
-  users = users.filter((u) => {
-    const hay = `${u.name} ${u.email}`.toLowerCase();
-    if (search && !hay.includes(search)) return false;
-    if (filter && !u.name.toLowerCase().includes(filter)) return false;
-    return true;
-  });
-  const countEl = document.getElementById('users-row-count');
-  if (countEl) countEl.textContent = rowCountLabel(0, users.length);
-  document.getElementById('users-table').innerHTML = users.length
-    ? `<table class="data-table"><thead><tr>
-        <th><input type="checkbox" disabled /></th>
-        <th>${t('name')}</th><th>${t('email')}</th><th>${t('registrationDate')}</th>
-        <th>${t('status')}</th><th>${t('adminRole')}</th>
-      </tr></thead><tbody>
-      ${users.map((u) => `<tr>
-        <td><input type="checkbox" /></td>
-        <td><strong>${u.name}</strong></td>
-        <td>${u.email}</td>
-        <td>${new Date(u.registeredAt).toLocaleDateString()}</td>
-        <td><span class="badge ${u.status === 'active' ? 'order-ready' : 'order-pending'}">${u.status === 'active' ? t('active') : t('pending')}</span></td>
-        <td>${u.role === 'admin' ? t('admin') : t('staff')}</td>
-      </tr>`).join('')}
-    </tbody></table>`
-    : `<table class="data-table"><tbody><tr class="empty-row"><td colspan="6">${t('noResults')}</td></tr></tbody></table>`;
-}
-
 function updateOrderTotalPreview() {
   const form = document.getElementById('order-form');
   if (!form) return;
@@ -1969,6 +1922,7 @@ async function checkoutSale() {
 
   posCart = [];
   resetSaleTaxAndDiscount();
+  resetPosCustomer();
   renderCart();
   renderSaleBill(sale);
 }
@@ -1987,7 +1941,6 @@ async function refreshAll() {
   await loadReports();
   loadCustomers();
   loadExpenses();
-  if (typeof isAdminUser === 'function' && isAdminUser()) loadUsers();
   updateTaxInputUi();
   renderCart();
 }
@@ -2167,7 +2120,6 @@ document.getElementById('custom-item-form')?.addEventListener('submit', (e) => {
   document.getElementById('custom-item-modal')?.close();
 });
 document.getElementById('refresh-expenses')?.addEventListener('click', loadExpenses);
-document.getElementById('refresh-users')?.addEventListener('click', loadUsers);
 
 document.getElementById('close-order-modal')?.addEventListener('click', () => document.getElementById('order-modal').close());
 document.getElementById('cancel-order-modal')?.addEventListener('click', () => document.getElementById('order-modal').close());
@@ -2225,8 +2177,6 @@ document.getElementById('filter-customers')?.addEventListener('input', loadCusto
 document.getElementById('filter-expenses')?.addEventListener('input', loadExpenses);
 document.getElementById('expense-start')?.addEventListener('change', loadExpenses);
 document.getElementById('expense-end')?.addEventListener('change', loadExpenses);
-document.getElementById('search-users')?.addEventListener('input', loadUsers);
-document.getElementById('filter-users')?.addEventListener('input', loadUsers);
 
 document.querySelectorAll('.report-tab').forEach((tab) => {
   tab.addEventListener('click', () => {
@@ -2250,18 +2200,6 @@ document.getElementById('pos-customer-search')?.addEventListener('input', () => 
   renderCustomerSuggestions();
 });
 document.getElementById('pos-customer-search')?.addEventListener('focus', renderCustomerSuggestions);
-document.getElementById('pos-customer-name')?.addEventListener('input', () => {
-  if (getSaleCustomerName()) clearPosCustomerNameError();
-  selectedCustomer = {
-    name: getSaleCustomerName(),
-    phone: getSaleCustomerPhone()
-  };
-  renderSaleCustomer();
-});
-document.getElementById('pos-customer-phone')?.addEventListener('input', () => {
-  if (selectedCustomer) selectedCustomer.phone = getSaleCustomerPhone();
-  renderSaleCustomer();
-});
 document.getElementById('customer-suggestions')?.addEventListener('click', (e) => {
   const id = e.target.closest('[data-customer-pick]')?.dataset.customerPick;
   if (!id) return;
@@ -2275,7 +2213,6 @@ document.addEventListener('click', (e) => {
   }
 });
 document.getElementById('pos-theme-toggle')?.addEventListener('click', () => toast(t('comingSoon')));
-document.getElementById('inv-theme-toggle')?.addEventListener('click', () => toast(t('comingSoon')));
 document.getElementById('pos-search')?.addEventListener('input', () => loadPOS());
 document.getElementById('pos-filter-category')?.addEventListener('change', () => loadPOS());
 document.getElementById('pos-sort')?.addEventListener('change', () => {
@@ -2338,8 +2275,8 @@ document.getElementById('customer-form')?.addEventListener('submit', (e) => {
     id: `c-${Date.now()}`,
     name: fd.get('name'),
     phone: fd.get('phone'),
-    email: fd.get('email'),
-    address: fd.get('address'),
+    email: '',
+    address: fd.get('address') || '',
     purchases: 0
   });
   saveLocalData('subarnapasal.customers', customers);
