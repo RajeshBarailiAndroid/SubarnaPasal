@@ -500,11 +500,11 @@
                     <label class="radio-label"><input type="radio" name="priceMode" value="api" /><span data-i18n="useLiveApi">Use Live API Price</span></label>
                   </div>
                   <div class="form-grid manual-price-fields">
-                    <label><span data-currency-field="goldRateGram">Gold rate per gram</span><input name="goldRatePerGram" type="number" min="0" step="1" required /></label>
-                    <label><span data-currency-field="goldRateTola">Gold rate per tola</span><input id="gold-rate-tola" readonly tabindex="-1" /></label>
+                    <label><span data-currency-field="goldRateGram">Gold rate per gram</span><input name="goldRatePerGram" type="number" min="0" step="0.01" required /></label>
+                    <label><span data-currency-field="goldRateTola">Gold rate per tola</span><input name="goldRatePerTola" type="number" min="0" step="0.01" required /></label>
                     <label><span data-currency-field="silverRateGram">Silver rate per gram</span><input name="silverRatePerGram" type="number" min="0" step="0.01" /></label>
-                    <label><span data-currency-field="silverRateTola">Silver rate per tola</span><input id="silver-rate-tola" readonly tabindex="-1" /></label>
-                    <p class="settings-hint span-2" data-i18n="weightUnitsHint">1 Tola = 11.66 grams · 1 Tola = 16 Aana · 1 Aana = 6.25 Laal. Per-tola rate is calculated from the gram rate.</p>
+                    <label><span data-currency-field="silverRateTola">Silver rate per tola</span><input name="silverRatePerTola" type="number" min="0" step="0.01" /></label>
+                    <p class="settings-hint span-2" data-i18n="metalRateSyncHint">Gram and tola rates stay in sync (1 tola = 11.66 g). Edit either field.</p>
                   </div>
                   <div class="settings-actions">
                     <button type="submit" class="btn btn-gold" data-i18n="savePriceSettings">Save Price Settings</button>

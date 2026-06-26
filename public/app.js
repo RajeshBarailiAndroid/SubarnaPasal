@@ -162,24 +162,88 @@ function formatGramRateFromTola(tolaNpr) {
   return formatRateInput((tolaNpr || 0) / TOLA_GRAMS);
 }
 
+function formatTolaRateInput(tolaNpr) {
+  return formatRateInput(tolaNpr || 0);
+}
+
+function parseTolaRateInput(value) {
+  return parseRateInput(value);
+}
+
 function parseTolaFromGramInput(gramValue) {
   return Number((parseRateInput(gramValue) * TOLA_GRAMS).toFixed(2));
+}
+
+let metalRateSyncLock = false;
+
+function syncSettingsGoldRateFromGram() {
+  if (metalRateSyncLock) return;
+  const gramInput = document.querySelector('#settings-form [name="goldRatePerGram"]');
+  const tolaInput = document.querySelector('#settings-form [name="goldRatePerTola"]');
+  if (!gramInput || !tolaInput) return;
+  metalRateSyncLock = true;
+  const tolaNpr = parseTolaFromGramInput(gramInput.value);
+  tolaInput.value = formatTolaRateInput(tolaNpr);
+  metalRateSyncLock = false;
+}
+
+function syncSettingsGoldRateFromTola() {
+  if (metalRateSyncLock) return;
+  const gramInput = document.querySelector('#settings-form [name="goldRatePerGram"]');
+  const tolaInput = document.querySelector('#settings-form [name="goldRatePerTola"]');
+  if (!gramInput || !tolaInput) return;
+  metalRateSyncLock = true;
+  const tolaNpr = parseTolaRateInput(tolaInput.value);
+  gramInput.value = formatGramRateFromTola(tolaNpr);
+  metalRateSyncLock = false;
+}
+
+function syncSettingsSilverRateFromGram() {
+  if (metalRateSyncLock) return;
+  const gramInput = document.querySelector('#settings-form [name="silverRatePerGram"]');
+  const tolaInput = document.querySelector('#settings-form [name="silverRatePerTola"]');
+  if (!gramInput || !tolaInput) return;
+  metalRateSyncLock = true;
+  const tolaNpr = parseTolaFromGramInput(gramInput.value);
+  tolaInput.value = formatTolaRateInput(tolaNpr);
+  metalRateSyncLock = false;
+}
+
+function syncSettingsSilverRateFromTola() {
+  if (metalRateSyncLock) return;
+  const gramInput = document.querySelector('#settings-form [name="silverRatePerGram"]');
+  const tolaInput = document.querySelector('#settings-form [name="silverRatePerTola"]');
+  if (!gramInput || !tolaInput) return;
+  metalRateSyncLock = true;
+  const tolaNpr = parseTolaRateInput(tolaInput.value);
+  gramInput.value = formatGramRateFromTola(tolaNpr);
+  metalRateSyncLock = false;
 }
 
 function refreshMetalPriceFields() {
   const priceForm = document.getElementById('settings-form');
   if (!priceForm) return;
   const goldGramField = priceForm.goldRatePerGram;
+  const goldTolaField = priceForm.goldRatePerTola;
   const silverGramField = priceForm.silverRatePerGram;
+  const silverTolaField = priceForm.silverRatePerTola;
+  const rateStep = currencyCode() === 'NPR' ? '1' : '0.01';
   if (goldGramField) {
     goldGramField.value = formatGramRateFromTola(goldRateCache);
-    goldGramField.step = currencyCode() === 'NPR' ? '1' : '0.01';
+    goldGramField.step = rateStep;
+  }
+  if (goldTolaField) {
+    goldTolaField.value = formatTolaRateInput(goldRateCache);
+    goldTolaField.step = rateStep;
   }
   if (silverGramField) {
     silverGramField.value = formatGramRateFromTola(silverRateCache);
-    silverGramField.step = currencyCode() === 'NPR' ? '0.01' : '0.01';
+    silverGramField.step = '0.01';
   }
-  updateMetalRatePreviews();
+  if (silverTolaField) {
+    silverTolaField.value = formatTolaRateInput(silverRateCache);
+    silverTolaField.step = rateStep;
+  }
   refreshCurrencyLabels();
 }
 
@@ -1492,21 +1556,8 @@ async function updateMetalRates(settings) {
 }
 
 function updateMetalRatePreviews() {
-  const goldGramInput = document.querySelector('#settings-form [name="goldRatePerGram"]');
-  const goldTolaEl = document.getElementById('gold-rate-tola');
-  if (goldGramInput && goldTolaEl) {
-    const gramRate = Number(goldGramInput.value);
-    const tola = Number((gramRate * TOLA_GRAMS).toFixed(currencyCode() === 'NPR' ? 2 : 4));
-    goldTolaEl.value = Number.isFinite(tola) ? tola : '';
-  }
-
-  const silverGramInput = document.querySelector('#settings-form [name="silverRatePerGram"]');
-  const silverTolaEl = document.getElementById('silver-rate-tola');
-  if (silverGramInput && silverTolaEl) {
-    const gramRate = Number(silverGramInput.value);
-    const tola = Number((gramRate * TOLA_GRAMS).toFixed(currencyCode() === 'NPR' ? 2 : 4));
-    silverTolaEl.value = Number.isFinite(tola) ? tola : '';
-  }
+  syncSettingsGoldRateFromGram();
+  syncSettingsSilverRateFromGram();
 }
 
 function renderLocationDatalist() {
@@ -3794,8 +3845,10 @@ document.getElementById('settings-form')?.addEventListener('submit', async (e) =
   e.preventDefault();
   const fd = new FormData(e.target);
   try {
-    const goldRatePerTola = parseTolaFromGramInput(fd.get('goldRatePerGram'));
-    const silverRatePerTola = parseTolaFromGramInput(fd.get('silverRatePerGram') || 0);
+    const goldRatePerTola = parseTolaRateInput(fd.get('goldRatePerTola'))
+      || parseTolaFromGramInput(fd.get('goldRatePerGram'));
+    const silverRatePerTola = parseTolaRateInput(fd.get('silverRatePerTola'))
+      || parseTolaFromGramInput(fd.get('silverRatePerGram') || 0);
     const priceMode = fd.get('priceMode');
     await api('/api/settings', {
       method: 'PATCH',
@@ -3816,13 +3869,10 @@ document.getElementById('settings-form')?.addEventListener('submit', async (e) =
   } catch (err) { toast(err.message); }
 });
 
-document.querySelector('#settings-form [name="goldRatePerGram"]')?.addEventListener('input', () => {
-  updateMetalRatePreviews();
-});
-
-document.querySelector('#settings-form [name="silverRatePerGram"]')?.addEventListener('input', () => {
-  updateMetalRatePreviews();
-});
+document.querySelector('#settings-form [name="goldRatePerGram"]')?.addEventListener('input', syncSettingsGoldRateFromGram);
+document.querySelector('#settings-form [name="goldRatePerTola"]')?.addEventListener('input', syncSettingsGoldRateFromTola);
+document.querySelector('#settings-form [name="silverRatePerGram"]')?.addEventListener('input', syncSettingsSilverRateFromGram);
+document.querySelector('#settings-form [name="silverRatePerTola"]')?.addEventListener('input', syncSettingsSilverRateFromTola);
 
 document.getElementById('language-select')?.addEventListener('change', (e) => {
   changeLanguage(e.target.value);
