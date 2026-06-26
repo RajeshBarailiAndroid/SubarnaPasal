@@ -294,8 +294,23 @@ function ensureLiveDailyFlatAnchor(tolaNpr, gramNpr) {
 }
 
 function buildDailyChartSeries() {
-  if (isLiveDailyApiMode()) {
-    if (!liveDailySecondSeries.length) return [];
+  const historyRows = rateHistoryForDisplay()
+    .filter(isRowToday)
+    .filter((row) => Number(row.goldRatePerTola) > 0)
+    .sort((a, b) => (a.updatedAt || a.date).localeCompare(b.updatedAt || b.date));
+
+  const fromRateHistory = () => {
+    if (!historyRows.length) return [];
+    const spread = spreadDailyChartTimestamps(historyRows.map((row, i) => ({
+      ...rowToDailyChartPoint(row, { saved: true }),
+      secondNum: i + 1,
+      daySecond: daySecondFromIso(row.updatedAt),
+      label: formatRateHistoryIntradayLabel(row.updatedAt)
+    })));
+    return attachRateHistoryComparisons(spread);
+  };
+
+  if (isLiveDailyApiMode() && liveDailySecondSeries.length) {
     return attachRateHistoryComparisons(liveDailySecondSeries.map((row, i) => ({
       ...rowToDailyChartPoint(row, {
         liveTick: i === liveDailySecondSeries.length - 1,
@@ -307,13 +322,35 @@ function buildDailyChartSeries() {
     })));
   }
 
-  const saved = todaySavedRateRows();
-  if (!saved.length) return [];
-  return attachRateHistoryComparisons(saved.map((row, i) => ({
-    ...rowToDailyChartPoint(row, { saved: true }),
-    secondNum: i + 1,
-    label: formatRateHistoryIntradayLabel(row.updatedAt)
-  })));
+  return fromRateHistory();
+}
+
+function padSinglePointSeries(sorted, period) {
+  if (sorted.length !== 1) return sorted;
+  const only = sorted[0];
+  if (period === 'daily') {
+    const dayStart = localDayStartIso();
+    const now = new Date().toISOString();
+    return [
+      {
+        ...only,
+        updatedAt: dayStart,
+        bucket: dayStart,
+        daySecond: 0,
+        label: '00:00:00',
+        chartTime: new Date(dayStart).getTime()
+      },
+      {
+        ...only,
+        updatedAt: now,
+        bucket: now,
+        daySecond: daySecondFromIso(now),
+        label: formatRateHistoryIntradayLabel(now),
+        chartTime: Date.now()
+      }
+    ];
+  }
+  return [{ ...only }, { ...only, chartPadEnd: true }];
 }
 
 function chartPointsFrom24Hour(sorted, pad, innerW, innerH, minV, span) {
@@ -1074,23 +1111,21 @@ function renderRateHistoryChart() {
   if (periodList) periodList.setAttribute('aria-label', t('ratePeriodAria'));
   const mode = currentRateHistoryPriceMode();
   const period = currentRateHistoryPeriod();
-  const useLiveSecondChart = period === 'daily' && isLiveDailyApiMode();
-  const todayRows = period === 'daily' ? todaySavedRateRows() : todayRateHistoryRows();
-  const sorted = period === 'daily'
+  const useLiveSecondChart = period === 'daily' && isLiveDailyApiMode() && liveDailySecondSeries.length > 0;
+  const todayRows = period === 'daily'
+    ? todaySavedRateRows()
+    : rateHistoryForDisplay().sort((a, b) => (b.updatedAt || b.date).localeCompare(a.updatedAt || a.date));
+  let sorted = period === 'daily'
     ? buildDailyChartSeries()
     : aggregateRateHistoryForChart(rateHistoryForDisplay(), period);
+  if (sorted.length === 1) sorted = padSinglePointSeries(sorted, period);
   const intradayList = sorted.length < 2 && !useLiveSecondChart
     ? renderRateIntradayReadingsHtml(todayRows, period)
     : '';
 
-  const minPoints = useLiveSecondChart ? 1 : 2;
-  if (sorted.length < minPoints) {
+  if (!sorted.length) {
     const emptyMsg = period === 'daily'
-      ? (useLiveSecondChart
-        ? t('rateIntradayCollecting')
-        : todayRows.length
-          ? t('rateIntradayCollecting')
-          : t('noRateHistoryChartDaily'))
+      ? (todayRows.length ? t('rateIntradayCollecting') : t('noRateHistoryChartDaily'))
       : t('noRateHistoryChart');
     el.innerHTML = `<p class="empty rate-chart-empty">${emptyMsg} (${ratePeriodLabel(period)} · ${rateHistoryModeLabel(mode)})</p>
       ${intradayList}`;
@@ -3329,7 +3364,9 @@ function renderInventoryTable() {
         <td>${itemStockStatusBadge(displayItem)}</td>
         <td>${formatMoney(getItemDisplayPrice(i))}</td>
         <td class="options-cell inventory-actions-cell">
-          <button type="button" class="link-btn" data-edit="${i.id}">${t('edit')}</button>
+          ${isItemSoldOut(i)
+    ? '<span class="inventory-no-edit">—</span>'
+    : `<button type="button" class="link-btn" data-edit="${i.id}">${t('edit')}</button>`}
           <button type="button" class="link-btn danger" data-delete="${i.id}">${t('delete')}</button>
         </td>
       </tr>`;
@@ -3626,6 +3663,10 @@ function mergeItemsIntoCache(items) {
 
 function canAddItemToPosCart(item) {
   return availableQuantity(item) > 0;
+}
+
+function isItemSoldOut(item) {
+  return Boolean(item && (item.status === 'sold_out' || Number(item.quantity) <= 0));
 }
 
 function itemStockStatusForDisplay(item) {
@@ -4186,7 +4227,7 @@ function itemPayloadFromForm(form, fd) {
     makingCharge: parseMoneyField(fd.get('makingCharge') || 0),
     purchaseCost: parseMoneyField(fd.get('purchaseCost') || 0),
     salePrice: fd.get('salePrice') ? parseMoneyField(fd.get('salePrice')) : 0,
-    quantity: status === 'sold_out' ? 0 : (status === 'in_stock' && quantity <= 0 ? 1 : quantity),
+    quantity: status === 'sold_out' ? 0 : quantity,
     status,
     location: String(fd.get('location') || '').trim(),
     hallmark: fd.get('hallmark') === 'on',
@@ -4195,6 +4236,10 @@ function itemPayloadFromForm(form, fd) {
 }
 
 function openItemModal(item) {
+  if (item && isItemSoldOut(item)) {
+    toast(t('soldOutItemNotEditable'));
+    return;
+  }
   editingId = item?.id || null;
   document.getElementById('modal-title').textContent = item ? t('editItemTitle') : t('addItemTitle');
   const form = document.getElementById('item-form');
@@ -4740,7 +4785,6 @@ document.getElementById('item-form')?.addEventListener('change', (e) => {
     const form = e.target.form;
     const qtyEl = form?.elements?.quantity;
     if (!qtyEl) return;
-    if (e.target.value === 'in_stock' && Number(qtyEl.value) <= 0) qtyEl.value = 1;
     if (e.target.value === 'sold_out') qtyEl.value = 0;
   }
 });

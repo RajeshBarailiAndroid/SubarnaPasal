@@ -360,22 +360,44 @@ function itemValue(item, goldRatePerTola) {
   return Math.round(goldValue + (item.makingCharge || 0));
 }
 
-function normalizeItemRecord(item) {
+function isItemSoldOut(item) {
+  return Boolean(item && (item.status === 'sold_out' || Number(item.quantity) <= 0));
+}
+
+function normalizeItemRecord(item, { isNew = false } = {}) {
   const qty = Math.max(0, Math.floor(Number(item.quantity) || 0));
-  let status = String(item.status || 'in_stock');
+  const status = String(item.status || 'in_stock');
+
   if (status === 'sold_out') {
     item.quantity = 0;
     item.status = 'sold_out';
-  } else if (status === 'in_stock' && qty === 0) {
-    item.quantity = 1;
-    item.status = 'in_stock';
-  } else if (qty > 0 && status === 'sold_out') {
-    item.quantity = qty;
-    item.status = 'in_stock';
-  } else {
-    item.quantity = qty;
-    item.status = status;
+    return item;
   }
+
+  if (status === 'in_stock' && qty === 0) {
+    if (isNew) {
+      item.quantity = 1;
+      item.status = 'in_stock';
+    } else {
+      item.quantity = 0;
+      item.status = 'sold_out';
+    }
+    return item;
+  }
+
+  if (qty > 0 && status === 'sold_out') {
+    if (isNew) {
+      item.quantity = qty;
+      item.status = 'in_stock';
+    } else {
+      item.quantity = 0;
+      item.status = 'sold_out';
+    }
+    return item;
+  }
+
+  item.quantity = qty;
+  item.status = status;
   return item;
 }
 
@@ -1268,7 +1290,7 @@ app.post('/api/items', asyncRoute(async (req, res) => {
     notes: String(body.notes || '').trim(),
     createdAt: now,
     updatedAt: now
-  });
+  }, { isNew: true });
   store.items.unshift(item);
   await writeStore(store, req.userId);
   res.status(201).json(item);
@@ -1279,6 +1301,9 @@ app.put('/api/items/:id', asyncRoute(async (req, res) => {
   const idx = store.items.findIndex((i) => i.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'Item not found.' });
   const existing = store.items[idx];
+  if (isItemSoldOut(existing)) {
+    return res.status(400).json({ error: 'Sold out items cannot be edited.' });
+  }
   const body = req.body || {};
   if (body.sku && body.sku !== existing.sku && store.items.some((i) => i.sku === body.sku)) {
     return res.status(400).json({ error: 'SKU already exists.' });
