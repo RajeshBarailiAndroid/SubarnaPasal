@@ -149,6 +149,102 @@ function newId(prefix) {
   return `${prefix}-${crypto.randomBytes(4).toString('hex')}`;
 }
 
+function customerMatchKey(name, phone) {
+  return `${String(name || '').trim().toLowerCase()}|${String(phone || '').trim()}`;
+}
+
+function parseCustomerNameFromSaleNote(note) {
+  const text = String(note || '');
+  const pos = text.match(/^POS — ([^·]+)/);
+  return pos ? pos[1].trim() : '';
+}
+
+function computeCustomerPurchaseCounts(store) {
+  const counts = new Map();
+  (store.orders || []).forEach((order) => {
+    if (order.status !== 'completed' || !order.customerName) return;
+    const key = customerMatchKey(order.customerName, order.customerPhone);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  });
+  (store.transactions || []).forEach((tx) => {
+    if (tx.type !== 'sale') return;
+    const name = parseCustomerNameFromSaleNote(tx.note);
+    if (!name) return;
+    const key = customerMatchKey(name, '');
+    counts.set(key, (counts.get(key) || 0) + 1);
+  });
+  return counts;
+}
+
+function syncCustomersFromOrders(store) {
+  const customers = [...(store.customers || [])];
+  const byKey = new Map(customers.map((c) => [customerMatchKey(c.name, c.phone), c]));
+  let changed = false;
+
+  (store.orders || []).forEach((order) => {
+    const name = String(order.customerName || '').trim();
+    if (!name) return;
+    const phone = String(order.customerPhone || '').trim();
+    const key = customerMatchKey(name, phone);
+    if (byKey.has(key)) return;
+    const customer = {
+      id: newId('c'),
+      name,
+      phone,
+      email: '',
+      address: '',
+      createdAt: order.createdAt || new Date().toISOString(),
+      purchases: 0
+    };
+    customers.push(customer);
+    byKey.set(key, customer);
+    changed = true;
+  });
+
+  if (changed) store.customers = customers;
+  return changed;
+}
+
+function listCustomersWithActivity(store) {
+  syncCustomersFromOrders(store);
+  const purchaseCounts = computeCustomerPurchaseCounts(store);
+  return (store.customers || [])
+    .map((customer) => ({
+      ...customer,
+      purchases: purchaseCounts.get(customerMatchKey(customer.name, customer.phone)) || 0
+    }))
+    .sort((a, b) => b.purchases - a.purchases || a.name.localeCompare(b.name));
+}
+
+function upsertCustomerInStore(store, payload) {
+  const name = String(payload.name || '').trim();
+  if (!name) return null;
+  const phone = String(payload.phone || '').trim();
+  const email = String(payload.email || '').trim();
+  const address = String(payload.address || '').trim();
+  const customers = [...(store.customers || [])];
+  const key = customerMatchKey(name, phone);
+  let customer = customers.find((c) => customerMatchKey(c.name, c.phone) === key);
+  if (customer) {
+    if (phone && !customer.phone) customer.phone = phone;
+    if (email && !customer.email) customer.email = email;
+    if (address && !customer.address) customer.address = address;
+  } else {
+    customer = {
+      id: newId('c'),
+      name,
+      phone,
+      email,
+      address,
+      createdAt: new Date().toISOString(),
+      purchases: 0
+    };
+    customers.unshift(customer);
+  }
+  store.customers = customers;
+  return customer;
+}
+
 function goldRateForValuation(metals) {
   if (metals.live) {
     const factor = DISPLAY_CURRENCY_NPR_PER_UNIT[metals.currency] || DISPLAY_CURRENCY_NPR_PER_UNIT.USD;
@@ -1221,6 +1317,51 @@ app.delete('/api/items/:id', asyncRoute(async (req, res) => {
   }
   await writeStore(store, req.userId);
   res.json({ ok: true });
+}));
+
+app.get('/api/customers', asyncRoute(async (req, res) => {
+  const store = await readStore(req.userId);
+  const changed = syncCustomersFromOrders(store);
+  if (changed) await writeStore(store, req.userId);
+  res.json({ customers: listCustomersWithActivity(store) });
+}));
+
+app.post('/api/customers', asyncRoute(async (req, res) => {
+  const store = await readStore(req.userId);
+  const name = String(req.body.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'Customer name is required.' });
+  const customer = upsertCustomerInStore(store, req.body);
+  await writeStore(store, req.userId);
+  const purchaseCounts = computeCustomerPurchaseCounts(store);
+  res.status(201).json({
+    customer: {
+      ...customer,
+      purchases: purchaseCounts.get(customerMatchKey(customer.name, customer.phone)) || 0
+    },
+    customers: listCustomersWithActivity(store)
+  });
+}));
+
+app.post('/api/customers/upsert', asyncRoute(async (req, res) => {
+  const store = await readStore(req.userId);
+  const customer = upsertCustomerInStore(store, req.body);
+  if (!customer) return res.status(400).json({ error: 'Customer name is required.' });
+  await writeStore(store, req.userId);
+  res.json({
+    customer,
+    customers: listCustomersWithActivity(store)
+  });
+}));
+
+app.delete('/api/customers/:id', asyncRoute(async (req, res) => {
+  const store = await readStore(req.userId);
+  const before = (store.customers || []).length;
+  store.customers = (store.customers || []).filter((c) => c.id !== req.params.id);
+  if (store.customers.length === before) {
+    return res.status(404).json({ error: 'Customer not found.' });
+  }
+  await writeStore(store, req.userId);
+  res.json({ customers: listCustomersWithActivity(store) });
 }));
 
 app.get('/api/transactions', asyncRoute(async (req, res) => {

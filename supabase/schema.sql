@@ -92,6 +92,7 @@ create table if not exists customers (
   name text not null,
   phone text default '',
   email text default '',
+  address text default '',
   created_at timestamptz default now(),
   primary key (user_id, id)
 );

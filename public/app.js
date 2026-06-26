@@ -1483,6 +1483,10 @@ let reportTab = 'sales';
 let orderGroup = 'progress';
 let reportCache = null;
 let selectedCustomer = null;
+let customersCache = [];
+let customersPollTimer = null;
+const CUSTOMERS_POLL_MS = 15000;
+let localCustomersMigrated = false;
 
 function rowCountLabel(selected, total) {
   return t('rowsSelectedFmt').replace('{s}', selected).replace('{n}', total);
@@ -2532,7 +2536,8 @@ async function api(path, opts = {}) {
   }
   if (!res.ok) throw new Error(data.error || 'Request failed');
   const skipRefresh = path.includes('/api/settings/daily-gold-rate')
-    || path.includes('/api/shared/gold-rates');
+    || path.includes('/api/shared/gold-rates')
+    || path.includes('/api/customers');
   if (isMutation && !isAuth && !skipRefresh) scheduleRefresh();
   return data;
 }
@@ -3049,7 +3054,11 @@ function showView(name) {
     initGoldCalculator();
     updateGoldCalculator();
   }
+  if (name === 'customers') {
+    loadCustomers().catch(() => {});
+  }
   syncMetalRatePolling();
+  syncCustomersPolling();
 }
 
 function cartLineName(line) {
@@ -3383,7 +3392,7 @@ function renderCustomItemCustomerSuggestions() {
     box.innerHTML = '';
     return;
   }
-  const matches = localData('subarnapasal.customers', []).filter((c) => {
+  const matches = customersCache.filter((c) => {
     const hay = `${c.name} ${c.phone || ''}`.toLowerCase();
     return hay.includes(q);
   }).slice(0, 6);
@@ -3561,7 +3570,7 @@ function renderCustomerSuggestions() {
     box.innerHTML = '';
     return;
   }
-  const matches = localData('subarnapasal.customers', []).filter((c) => {
+  const matches = customersCache.filter((c) => {
     const hay = `${c.name} ${c.phone || ''}`.toLowerCase();
     return hay.includes(q);
   }).slice(0, 6);
@@ -3760,7 +3769,7 @@ function renderInventoryReport(report) {
 }
 
 function renderCustomerReport(report) {
-  const customers = localData('subarnapasal.customers', []);
+  const customers = customersCache;
   const merged = report.customers.topCustomers.map((row) => {
     const saved = customers.find((c) => c.name === row.name);
     return { ...row, email: saved?.email || '—', purchases: saved?.purchases || row.orders };
@@ -3946,6 +3955,7 @@ async function loadOrders() {
     if (select) populateOrderItemSelect();
 
     applyOrdersSearch();
+    if (activeView === 'customers') loadCustomers().catch(() => {});
   } catch (err) {
     ordersAllCache = [];
     if (countEl) countEl.textContent = rowCountLabel(0, 0);
@@ -3954,11 +3964,10 @@ async function loadOrders() {
   }
 }
 
-function loadCustomers() {
+function renderCustomersTable() {
   const search = document.getElementById('search-customers')?.value.trim().toLowerCase() || '';
   const filter = document.getElementById('filter-customers')?.value.trim().toLowerCase() || '';
-  let customers = localData('subarnapasal.customers', []);
-  customers = customers.filter((c) => {
+  const customers = customersCache.filter((c) => {
     const hay = `${c.name} ${c.phone || ''} ${c.email || ''}`.toLowerCase();
     if (search && !hay.includes(search)) return false;
     if (filter && !c.name.toLowerCase().includes(filter)) return false;
@@ -3966,7 +3975,9 @@ function loadCustomers() {
   });
   const countEl = document.getElementById('customers-row-count');
   if (countEl) countEl.textContent = rowCountLabel(0, customers.length);
-  document.getElementById('customers-table').innerHTML = customers.length
+  const tableEl = document.getElementById('customers-table');
+  if (!tableEl) return;
+  tableEl.innerHTML = customers.length
     ? `<table class="data-table"><thead><tr>
         <th><input type="checkbox" disabled /></th>
         <th>${t('name')}</th><th>${t('customerPhone')}</th><th>${t('email')}</th>
@@ -3981,6 +3992,75 @@ function loadCustomers() {
       </tr>`).join('')}
     </tbody></table>`
     : `<table class="data-table"><tbody><tr class="empty-row"><td colspan="7">${t('noResults')}</td></tr></tbody></table>`;
+}
+
+async function migrateLocalCustomersOnce() {
+  if (localCustomersMigrated) return;
+  localCustomersMigrated = true;
+  const legacy = localData('subarnapasal.customers', []);
+  if (!legacy.length) return;
+  for (const row of legacy) {
+    try {
+      await api('/api/customers/upsert', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: row.name,
+          phone: row.phone || '',
+          email: row.email || '',
+          address: row.address || ''
+        })
+      });
+    } catch (_) { /* skip failed legacy row */ }
+  }
+  try { localStorage.removeItem('subarnapasal.customers'); } catch (_) { /* ignore */ }
+}
+
+async function upsertCustomerActivity(customer) {
+  const name = String(customer?.name || '').trim();
+  if (!name) return;
+  try {
+    const payload = await api('/api/customers/upsert', {
+      method: 'POST',
+      body: JSON.stringify({
+        name,
+        phone: customer.phone || '',
+        email: customer.email || '',
+        address: customer.address || ''
+      })
+    });
+    if (Array.isArray(payload.customers)) {
+      customersCache = payload.customers;
+      if (activeView === 'customers') renderCustomersTable();
+    }
+  } catch (_) { /* background save */ }
+}
+
+async function loadCustomers() {
+  try {
+    await migrateLocalCustomersOnce();
+    const payload = await api('/api/customers');
+    customersCache = payload.customers || [];
+    renderCustomersTable();
+  } catch (_) {
+    customersCache = localData('subarnapasal.customers', []);
+    renderCustomersTable();
+  }
+}
+
+function stopCustomersPolling() {
+  if (customersPollTimer) {
+    clearInterval(customersPollTimer);
+    customersPollTimer = null;
+  }
+}
+
+function syncCustomersPolling() {
+  stopCustomersPolling();
+  if (activeView !== 'customers') return;
+  loadCustomers().catch(() => {});
+  customersPollTimer = setInterval(() => {
+    loadCustomers().catch(() => {});
+  }, CUSTOMERS_POLL_MS);
 }
 
 function loadExpenses() {
@@ -4364,6 +4444,8 @@ async function checkoutSale() {
   resetPosCustomer();
   renderCart();
   renderSaleBill(sale);
+  await upsertCustomerActivity({ name: customer, phone: customerPhone });
+  scheduleRefresh();
 }
 
 async function refreshAll() {
@@ -4378,7 +4460,7 @@ async function refreshAll() {
   await loadInventory();
   await loadOrders();
   await loadReports();
-  loadCustomers();
+  await loadCustomers();
   loadExpenses();
   initGoldCalculator();
   updateGoldCalculator();
@@ -4412,7 +4494,7 @@ function renderOrderCustomerSuggestions() {
     box.innerHTML = '';
     return;
   }
-  const matches = localData('subarnapasal.customers', []).filter((c) => {
+  const matches = customersCache.filter((c) => {
     const hay = `${c.name} ${c.phone || ''}`.toLowerCase();
     return hay.includes(q);
   }).slice(0, 6);
@@ -4554,7 +4636,7 @@ document.getElementById('order-customer-search')?.addEventListener('focus', rend
 document.getElementById('order-customer-suggestions')?.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-order-customer-pick]');
   if (!btn) return;
-  const customer = localData('subarnapasal.customers', []).find((c) => c.id === btn.dataset.orderCustomerPick);
+  const customer = customersCache.find((c) => c.id === btn.dataset.orderCustomerPick);
   if (customer) fillOrderCustomerFields(customer);
 });
 document.getElementById('order-form')?.addEventListener('click', (e) => {
@@ -4595,7 +4677,7 @@ document.getElementById('custom-item-customer-search')?.addEventListener('focus'
 document.getElementById('custom-item-customer-suggestions')?.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-custom-item-customer-pick]');
   if (!btn) return;
-  const customer = localData('subarnapasal.customers', []).find((c) => c.id === btn.dataset.customItemCustomerPick);
+  const customer = customersCache.find((c) => c.id === btn.dataset.customItemCustomerPick);
   if (customer) fillCustomItemCustomerFields(customer);
 });
 document.getElementById('custom-item-form')?.addEventListener('input', (e) => {
@@ -4742,7 +4824,7 @@ document.getElementById('pos-customer-search')?.addEventListener('focus', render
 document.getElementById('customer-suggestions')?.addEventListener('click', (e) => {
   const id = e.target.closest('[data-customer-pick]')?.dataset.customerPick;
   if (!id) return;
-  const customer = localData('subarnapasal.customers', []).find((c) => c.id === id);
+  const customer = customersCache.find((c) => c.id === id);
   if (customer) selectPosCustomer(customer);
 });
 document.addEventListener('click', (e) => {
@@ -4860,29 +4942,39 @@ document.getElementById('order-form')?.addEventListener('submit', async (e) => {
     clearOrderCustomer();
     orderGroup = 'progress';
     setOrderGroup('progress');
+    await upsertCustomerActivity({
+      name: body.customerName,
+      phone: body.customerPhone
+    });
+    scheduleRefresh();
   } catch (err) { toast(err.message); }
 });
 
-document.getElementById('customer-form')?.addEventListener('submit', (e) => {
+document.getElementById('customer-form')?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const fd = new FormData(e.target);
-  const customers = localData('subarnapasal.customers', []);
-  customers.unshift({
-    id: `c-${Date.now()}`,
-    name: fd.get('name'),
-    phone: fd.get('phone'),
-    email: fd.get('email') || '',
-    address: fd.get('address') || '',
-    purchases: 0
-  });
-  saveLocalData('subarnapasal.customers', customers);
-  document.getElementById('customer-modal').close();
-  toast(t('customerSaved'));
-  selectPosCustomer(customers[0]);
-  if (document.getElementById('order-modal')?.open) {
-    fillOrderCustomerFields(customers[0]);
-  }
-  scheduleRefresh();
+  try {
+    const payload = await api('/api/customers', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: fd.get('name'),
+        phone: fd.get('phone'),
+        email: fd.get('email') || '',
+        address: fd.get('address') || ''
+      })
+    });
+    customersCache = payload.customers || customersCache;
+    const customer = payload.customer || customersCache[0];
+    document.getElementById('customer-modal').close();
+    toast(t('customerSaved'));
+    renderCustomersTable();
+    if (customer) {
+      selectPosCustomer(customer);
+      if (document.getElementById('order-modal')?.open) {
+        fillOrderCustomerFields(customer);
+      }
+    }
+  } catch (err) { toast(err.message); }
 });
 
 document.getElementById('expense-form')?.addEventListener('submit', (e) => {
@@ -4903,12 +4995,14 @@ document.getElementById('expense-form')?.addEventListener('submit', (e) => {
   scheduleRefresh();
 });
 
-document.getElementById('customers-table')?.addEventListener('click', (e) => {
+document.getElementById('customers-table')?.addEventListener('click', async (e) => {
   const id = e.target.dataset.customerDelete;
   if (!id) return;
-  const customers = localData('subarnapasal.customers', []).filter((c) => c.id !== id);
-  saveLocalData('subarnapasal.customers', customers);
-  scheduleRefresh();
+  try {
+    const payload = await api(`/api/customers/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    customersCache = payload.customers || [];
+    renderCustomersTable();
+  } catch (err) { toast(err.message); }
 });
 
 document.getElementById('expenses-table')?.addEventListener('click', (e) => {
