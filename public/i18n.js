@@ -2,6 +2,8 @@ const I18N = {
   en: {
     appTagline: 'Gold inventory POC',
     navPOS: 'POS',
+    navMenu: 'Menu',
+    heroCollectionTag: 'Gold Collection',
     navDashboard: 'Dashboard',
     navInventory: 'Inventory',
     navTransactions: 'Transactions',
@@ -538,6 +540,8 @@ const I18N = {
   ne: {
     appTagline: 'सुन पसल सूची (POC)',
     navPOS: 'POS',
+    navMenu: 'मेनु',
+    heroCollectionTag: 'सुन संग्रह',
     navDashboard: 'ड्यासबोर्ड',
     navInventory: 'स्टक',
     navTransactions: 'कारोबार',

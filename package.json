@@ -10,7 +10,8 @@
     "check:supabase": "node scripts/check-supabase.js",
     "migrate:user-schema": "node scripts/generate-migration.js",
     "apply:migration": "node scripts/apply-migration.js",
-    "connect:github": "bash scripts/connect-github.sh"
+    "connect:github": "bash scripts/connect-github.sh",
+    "sync:bg-images": "node scripts/sync-bg-images.js"
   },
   "engines": {
     "node": ">=18"
