@@ -11,6 +11,47 @@ const CURRENCIES = {
 
 let displayCurrency = 'USD';
 const moneyFormatters = {};
+const THEME_STORAGE_KEY = 'subarnapasal.theme';
+
+function getTheme() {
+  return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+}
+
+function applyTheme(theme) {
+  const next = theme === 'dark' ? 'dark' : 'light';
+  if (next === 'dark') {
+    document.documentElement.setAttribute('data-theme', 'dark');
+  } else {
+    document.documentElement.removeAttribute('data-theme');
+  }
+  try { localStorage.setItem(THEME_STORAGE_KEY, next); } catch (_) { /* ignore */ }
+  updateThemeToggleUI();
+}
+
+function toggleTheme() {
+  applyTheme(getTheme() === 'dark' ? 'light' : 'dark');
+  toast(t(getTheme() === 'dark' ? 'themeDarkOn' : 'themeLightOn'));
+}
+
+function initTheme() {
+  let theme = 'light';
+  try {
+    const saved = localStorage.getItem(THEME_STORAGE_KEY);
+    if (saved === 'dark' || saved === 'light') theme = saved;
+  } catch (_) { /* ignore */ }
+  applyTheme(theme);
+}
+
+function updateThemeToggleUI() {
+  const isDark = getTheme() === 'dark';
+  const label = isDark ? t('themeDark') : t('themeLight');
+  ['theme-toggle', 'pos-theme-toggle'].forEach((id) => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.title = label;
+    btn.setAttribute('aria-label', label);
+  });
+}
 
 function getCurrency() {
   return CURRENCIES[displayCurrency] || CURRENCIES.USD;
@@ -473,7 +514,7 @@ function buildGoldPriceXGrid(pad, innerW, innerH, h, period) {
   return '';
 }
 
-function renderGoldPriceOrgChart(el, sorted, mode, period, intradayList) {
+function renderGoldPriceOrgChart(el, sorted, mode, period) {
   const isDailyLive = period === 'daily' && isLiveDailyApiMode();
   const useStep = isDailyLive;
   const w = 900;
@@ -521,6 +562,14 @@ function renderGoldPriceOrgChart(el, sorted, mode, period, intradayList) {
       </g>`
     : '';
 
+  const pointDots = points.map((p, i) => {
+    const row = sorted[i];
+    const label = `${row.label || row.date}: ${formatCurrencyAmount(row.value)}`;
+    return `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4" class="gp-point" tabindex="-1">
+      <title>${label}</title>
+    </circle>`;
+  }).join('');
+
   el.innerHTML = `
     <div class="goldprice-chart">
       ${renderGoldPriceOrgHeader(sorted, mode, period)}
@@ -532,6 +581,7 @@ function renderGoldPriceOrgChart(el, sorted, mode, period, intradayList) {
           ${xLabels}
           ${areaPath ? `<path d="${areaPath}" class="gp-area" fill="url(#goldPriceArea)"/>` : ''}
           ${linePath ? `<path d="${linePath}" class="gp-line" filter="url(#goldPriceGlow)"/>` : ''}
+          ${pointDots}
           ${lastDot}
         </svg>
       </div>
@@ -539,7 +589,6 @@ function renderGoldPriceOrgChart(el, sorted, mode, period, intradayList) {
         <span>${ratePeriodHint(period)}</span>
         <span class="goldprice-powered">${t('goldChartPowered')}</span>
       </div>
-      ${intradayList}
     </div>`;
   const liveBanner = document.getElementById('live-daily-rate-now');
   if (liveBanner) liveBanner.hidden = true;
@@ -814,36 +863,6 @@ async function captureLiveDailyRate() {
   }
 }
 
-function renderRateIntradayReadingsHtml(rows, period) {
-  if (period !== 'daily' || !rows.length) return '';
-  const compared = attachRateHistoryComparisons(rows);
-  return `
-    <div class="rate-intraday-readings">
-      <h4 class="rate-intraday-title">${t('rateHistoryToday')}</h4>
-      <div class="table-wrap">
-        <table class="data-table rate-intraday-table">
-          <thead><tr>
-            <th>${t('date')}</th>
-            <th>${t('perTolaCol')}</th>
-            <th>${t('changeCol')}</th>
-          </tr></thead>
-          <tbody>
-            ${compared.map((row) => {
-              const changeHtml = row.change == null
-                ? '—'
-                : `<span class="rate-chart-compare ${rateHistoryChangeClass(row.change)}">${formatRateHistoryChange(row, 'daily')}</span>`;
-              return `<tr>
-                <td>${formatRateHistoryTableWhen(row)}</td>
-                <td>${formatMoney(row.goldRatePerTola)}</td>
-                <td>${changeHtml}</td>
-              </tr>`;
-            }).join('')}
-          </tbody>
-        </table>
-      </div>
-    </div>`;
-}
-
 function currentRateHistoryPeriod() {
   const active = document.querySelector('.rate-history-period [data-rate-period].is-active');
   const period = active?.dataset.ratePeriod;
@@ -1076,32 +1095,79 @@ function updateRateHistoryClearBtn() {
   btn.setAttribute('aria-label', t('clearRateHistory'));
 }
 
+const RATE_CHART_Y_MIN = 1300;
+const RATE_CHART_Y_MAX = 1800;
+/** Minimum Y span so a 0.1 move is visible on the chart (~3px at typical height). */
+const RATE_CHART_MIN_SPAN = 8;
+const RATE_CHART_FULL_BAND_RANGE = 120;
+
 function formatChartAxisAmount(amount) {
   const n = Number(amount) || 0;
+  if (n >= RATE_CHART_Y_MIN && n <= RATE_CHART_Y_MAX) {
+    return n.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  }
   if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  if (n >= 10000) return `${(n / 1000).toFixed(1)}k`;
   return formatCurrencyAmount(n);
 }
 
+function clampRateChartBounds(minV, maxV) {
+  let min = minV;
+  let max = maxV;
+  if (min < RATE_CHART_Y_MIN) {
+    max += RATE_CHART_Y_MIN - min;
+    min = RATE_CHART_Y_MIN;
+  }
+  if (max > RATE_CHART_Y_MAX) {
+    min -= max - RATE_CHART_Y_MAX;
+    max = RATE_CHART_Y_MAX;
+  }
+  min = Math.max(RATE_CHART_Y_MIN, min);
+  max = Math.min(RATE_CHART_Y_MAX, max);
+  if (max - min < RATE_CHART_MIN_SPAN) {
+    if (max >= RATE_CHART_Y_MAX) {
+      min = RATE_CHART_Y_MAX - RATE_CHART_MIN_SPAN;
+    } else {
+      max = Math.min(RATE_CHART_Y_MIN + RATE_CHART_MIN_SPAN, RATE_CHART_Y_MAX);
+    }
+  }
+  return { minV: min, maxV: max };
+}
+
 function chartValueBounds(values) {
-  const RATE_CHART_Y_FLOOR = 1000;
   const dataMin = Math.min(...values);
   const dataMax = Math.max(...values);
   const range = dataMax - dataMin;
+  const dataInBand = dataMax >= RATE_CHART_Y_MIN && dataMin <= RATE_CHART_Y_MAX;
+
+  if (!dataInBand) {
+    const padAmt = Math.max(range * 0.25, range <= 0 ? Math.max(Math.abs(dataMin) * 0.001, 0.5) : 0.5);
+    if (range <= 0) {
+      return { minV: dataMin - padAmt, maxV: dataMax + padAmt };
+    }
+    return { minV: dataMin - padAmt, maxV: dataMax + padAmt };
+  }
+
+  if (range >= RATE_CHART_FULL_BAND_RANGE) {
+    return { minV: RATE_CHART_Y_MIN, maxV: RATE_CHART_Y_MAX };
+  }
 
   if (range <= 0) {
-    const padAmt = Math.max(dataMin * 0.001, 1);
-    return { minV: dataMin - padAmt, maxV: dataMax + padAmt };
+    return clampRateChartBounds(
+      dataMin - RATE_CHART_MIN_SPAN / 2,
+      dataMax + RATE_CHART_MIN_SPAN / 2
+    );
   }
 
-  if (dataMin >= RATE_CHART_Y_FLOOR && range < dataMax * 0.08) {
-    const padAmt = Math.max(range * 0.25, 1);
-    return { minV: dataMin - padAmt, maxV: dataMax + padAmt };
+  const padAmt = Math.max(range * 0.2, 0.5);
+  let minV = dataMin - padAmt;
+  let maxV = dataMax + padAmt;
+  if (maxV - minV < RATE_CHART_MIN_SPAN) {
+    const mid = (dataMin + dataMax) / 2;
+    minV = mid - RATE_CHART_MIN_SPAN / 2;
+    maxV = mid + RATE_CHART_MIN_SPAN / 2;
   }
-
-  const minV = Math.min(dataMin, RATE_CHART_Y_FLOOR);
-  const maxV = dataMax + range * 0.08;
-  return { minV, maxV };
+  return clampRateChartBounds(minV, maxV);
 }
 
 function renderRateHistoryChart() {
@@ -1111,7 +1177,6 @@ function renderRateHistoryChart() {
   if (periodList) periodList.setAttribute('aria-label', t('ratePeriodAria'));
   const mode = currentRateHistoryPriceMode();
   const period = currentRateHistoryPeriod();
-  const useLiveSecondChart = period === 'daily' && isLiveDailyApiMode() && liveDailySecondSeries.length > 0;
   const todayRows = period === 'daily'
     ? todaySavedRateRows()
     : rateHistoryForDisplay().sort((a, b) => (b.updatedAt || b.date).localeCompare(a.updatedAt || a.date));
@@ -1119,16 +1184,12 @@ function renderRateHistoryChart() {
     ? buildDailyChartSeries()
     : aggregateRateHistoryForChart(rateHistoryForDisplay(), period);
   if (sorted.length === 1) sorted = padSinglePointSeries(sorted, period);
-  const intradayList = sorted.length < 2 && !useLiveSecondChart
-    ? renderRateIntradayReadingsHtml(todayRows, period)
-    : '';
 
   if (!sorted.length) {
     const emptyMsg = period === 'daily'
       ? (todayRows.length ? t('rateIntradayCollecting') : t('noRateHistoryChartDaily'))
       : t('noRateHistoryChart');
-    el.innerHTML = `<p class="empty rate-chart-empty">${emptyMsg} (${ratePeriodLabel(period)} · ${rateHistoryModeLabel(mode)})</p>
-      ${intradayList}`;
+    el.innerHTML = `<p class="empty rate-chart-empty">${emptyMsg} (${ratePeriodLabel(period)} · ${rateHistoryModeLabel(mode)})</p>`;
     if (period === 'daily' && isLiveDailyApiMode()) {
       renderLiveDailyRateNow();
     }
@@ -1136,36 +1197,11 @@ function renderRateHistoryChart() {
     return;
   }
 
-  renderGoldPriceOrgChart(el, sorted, mode, period, intradayList);
+  renderGoldPriceOrgChart(el, sorted, mode, period);
 }
 
 function renderRateHistoryTable() {
-  const historyEl = document.getElementById('rate-history');
-  if (!historyEl) return;
-  const period = currentRateHistoryPeriod();
-  const saved = period === 'daily'
-    ? [...todaySavedRateRows()].sort((a, b) => (b.updatedAt || b.date).localeCompare(a.updatedAt || a.date))
-    : [...rateHistoryForDisplay()].sort((a, b) => (b.updatedAt || b.date).localeCompare(a.updatedAt || a.date));
-  const title = period === 'daily' ? t('rateHistoryToday') : t('rateHistory');
-  const liveRow = period === 'daily' && isLiveDailyApiMode() && liveDailyCurrentTick
-    ? `<tr class="rate-row-live">
-        <td>${formatRateHistoryTableWhen(liveDailyCurrentTick)} · ${t('liveRateNow')}</td>
-        <td>${formatMoney(liveDailyCurrentTick.goldRatePerTola)}</td>
-        <td>${formatMoney(liveDailyCurrentTick.goldRatePerGram)}</td>
-      </tr>`
-    : '';
-  historyEl.innerHTML = saved.length || liveRow
-    ? `<h4 class="rate-history-table-title">${title}</h4>
-      <table class="data-table"><thead><tr><th>${t('date')}</th><th>${t('perTolaCol')}</th><th>${t('perGramCol')}</th></tr></thead><tbody>
-      ${liveRow}
-      ${saved.map((row) => `<tr>
-        <td>${formatRateHistoryTableWhen(row)}</td>
-        <td>${formatMoney(row.goldRatePerTola)}</td>
-        <td>${formatMoney(row.goldRatePerGram)}</td>
-      </tr>`).join('')}
-    </tbody></table>`
-    : `<p class="empty">${period === 'daily' ? t('noRateHistoryToday') : t('noRateHistory')}</p>`;
-  updateRateHistoryClearBtn();
+  /* Chart-only: rate values shown in graph header and tooltips, not in a table. */
 }
 
 async function clearRateHistoryForCurrentMode() {
@@ -4668,6 +4704,7 @@ function initDateDefaults() {
 
 function changeLanguage(lang) {
   setLanguage(lang);
+  updateThemeToggleUI();
   refreshAll().then(() => toast(t('languageSaved'))).catch((err) => toast(err.message));
 }
 
@@ -4882,7 +4919,7 @@ document.addEventListener('click', (e) => {
     if (box) box.hidden = true;
   }
 });
-document.getElementById('pos-theme-toggle')?.addEventListener('click', () => toast(t('comingSoon')));
+document.getElementById('pos-theme-toggle')?.addEventListener('click', toggleTheme);
 document.getElementById('pos-search')?.addEventListener('input', () => loadPOS());
 document.getElementById('pos-filter-category')?.addEventListener('change', () => loadPOS());
 document.getElementById('pos-sort')?.addEventListener('change', () => {
@@ -5300,7 +5337,7 @@ document.getElementById('new-category-input')?.addEventListener('keydown', (e) =
   }
 });
 
-document.getElementById('theme-toggle')?.addEventListener('click', () => toast(t('comingSoon')));
+document.getElementById('theme-toggle')?.addEventListener('click', toggleTheme);
 
 window.addEventListener('beforeunload', () => { flushSharedGraphTicks(); });
 document.addEventListener('visibilitychange', () => {
@@ -5309,7 +5346,9 @@ document.addEventListener('visibilitychange', () => {
 
 async function initApp() {
   initDateDefaults();
+  initTheme();
   setLanguage(currentLang);
+  updateThemeToggleUI();
   if (typeof waitForAuthReady === 'function') await waitForAuthReady();
 
   const authRequired = typeof isAuthRequired === 'function' && isAuthRequired();
