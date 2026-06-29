@@ -12,10 +12,20 @@ function initLoginPage() {
   if (!isLoginPage()) return;
 
   initAuthPageLanguage('loginTitle');
+  initPhoneRegionUI({
+    regionSelectId: 'signup-phone-region',
+    phoneInputId: 'signup-phone',
+    hintId: 'signup-phone-hint'
+  });
 
   document.getElementById('show-signup-panel')?.addEventListener('click', () => {
     document.getElementById('signup-form')?.reset();
     showAuthPanel('signup');
+    initPhoneRegionUI({
+      regionSelectId: 'signup-phone-region',
+      phoneInputId: 'signup-phone',
+      hintId: 'signup-phone-hint'
+    });
   });
   document.getElementById('show-login-panel')?.addEventListener('click', () => showAuthPanel('login'));
 

@@ -417,6 +417,7 @@
                     <select id="calc-price-type">
                       <option value="sell" data-i18n-option="calcPriceSell">Sell price</option>
                       <option value="buy" data-i18n-option="calcPriceBuy">Buy price</option>
+                      <option value="buy2" data-i18n-option="calcPriceBuy2">Custom buy price</option>
                     </select>
                   </label>
                   <label class="span-2"><span data-i18n="calcRateUnit">Rate unit</span>
@@ -500,17 +501,21 @@
                     <select id="language-select"><option value="en">English</option><option value="ne">नेपाली</option></select>
                   </label>
                 </div>
-                <div class="language-row">
-                  <label><span data-i18n="displayCurrency">Display currency</span>
-                    <select id="currency-select" aria-label="Display currency"></select>
-                  </label>
-                  <p class="settings-hint" data-i18n="displayCurrencyDesc">Prices, totals, and live metal rates are shown in NPR, USD, or CAD.</p>
-                </div>
               </article>
               <article class="panel settings-card span-2">
                 <h2 data-i18n="metalPriceConfig">Metal Price Configuration</h2>
                 <p class="panel-desc" data-i18n="metalPriceDesc">Set how metal prices are determined for display.</p>
                 <form id="settings-form" class="settings-form">
+                  <div class="form-grid settings-currency-row">
+                    <label class="span-2"><span data-i18n="displayCurrency">Display currency</span>
+                      <select id="currency-select" aria-label="Display currency">
+                        <option value="NPR">NPR — Nepalese Rupee (रू)</option>
+                        <option value="USD">USD — US Dollar ($)</option>
+                        <option value="CAD">CAD — Canadian Dollar (CA$)</option>
+                      </select>
+                    </label>
+                    <p class="settings-hint span-2" data-i18n="displayCurrencyDesc">Prices, totals, and live metal rates are shown in NPR, USD, or CAD.</p>
+                  </div>
                   <div class="price-mode">
                     <label class="radio-label"><input type="radio" name="priceMode" value="manual" checked /><span data-i18n="useManualPrice">Use Manual Price</span></label>
                     <label class="radio-label"><input type="radio" name="priceMode" value="api" /><span data-i18n="useLiveApi">Use Live API Price</span></label>
@@ -659,7 +664,15 @@
         </header>
         <div class="form-grid">
           <label class="span-2"><span data-i18n="customerNameRequired">Customer name *</span><input name="name" required autocomplete="name" /></label>
-          <label class="span-2"><span data-i18n="customerPhone">Phone</span><input name="phone" type="tel" data-i18n-placeholder="customerPhonePlaceholder" placeholder="(555) 123-4567" autocomplete="tel" /></label>
+          <label class="span-2"><span data-i18n="authPhoneRegion">Phone region</span>
+            <select id="customer-phone-region" class="phone-region-select" aria-label="Phone region">
+              <option value="NP" data-i18n-option="authPhoneRegionNP">Nepal (+977)</option>
+              <option value="US" data-i18n-option="authPhoneRegionUS">United States (+1)</option>
+              <option value="CA" data-i18n-option="authPhoneRegionCA">Canada (+1)</option>
+            </select>
+          </label>
+          <label class="span-2"><span data-i18n="customerPhone">Phone</span><input name="phone" id="customer-phone-input" type="tel" data-i18n-placeholder="authPhonePlaceholderNP" placeholder="98XXXXXXXX" autocomplete="tel" /></label>
+          <p class="form-hint span-2" id="customer-phone-hint" data-i18n="customerPhoneHintNP">Nepal mobile: 97/98XXXXXXXX</p>
           <label class="span-2"><span data-i18n="email">Email</span><input name="email" type="email" autocomplete="email" /></label>
           <label class="span-2"><span data-i18n="address">Address</span><input name="address" autocomplete="street-address" /></label>
         </div>
@@ -845,11 +858,11 @@
     <datalist id="location-options"></datalist>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="i18n.js"></script>
+    <script src="i18n.js?v=4"></script>
     <script src="auth.js"></script>
-    <script src="phone.js"></script>
+    <script src="phone.js?v=4"></script>
     <script src="bg-slider.js"></script>
     <script src="hero-carousel.js"></script>
-    <script src="app.js"></script>
+    <script src="app.js?v=4"></script>
   </body>
 </html>

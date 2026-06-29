@@ -3176,6 +3176,10 @@ th {
   color: var(--muted);
 }
 
+.settings-currency-row {
+  margin-bottom: 0.25rem;
+}
+
 .price-mode {
   display: flex;
   flex-direction: column;
@@ -4562,6 +4566,25 @@ body.auth-page .auth-page-main {
   display: flex;
   justify-content: flex-end;
   margin-bottom: 1rem;
+}
+
+.auth-phone-region-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.auth-phone-region-field select,
+.phone-region-select {
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
 }
 
 .auth-page-lang {

@@ -25,7 +25,6 @@ const {
   usernameToEmail,
   isSyntheticAuthEmail,
   isValidUsername,
-  isValidPhone,
   isValidEmail,
   isValidPassword,
   isAuthConfigured,
@@ -36,6 +35,12 @@ const {
   displayNameFromUser,
   lookupDisplayNameFromDb
 } = require('./lib/auth');
+const {
+  isValidPhone,
+  isValidPhoneForRegion,
+  normalizePhoneRegion,
+  phoneErrorMessage
+} = require('./lib/phone');
 const { getLiveMetalRates, isMetalApiConfigured, getProvider, normalizeMetalCurrency } = require('./lib/metal-rates');
 const { captureSharedGoldRateIfChanged, recordSharedApiGoldReading, displayToNpr, localDateStr } = require('./lib/capture-shared-gold-rate');
 
@@ -149,6 +154,16 @@ function newId(prefix) {
   return `${prefix}-${crypto.randomBytes(4).toString('hex')}`;
 }
 
+function validateCustomerPhone(phone, phoneRegion) {
+  if (!phone) return null;
+  if (phoneRegion) {
+    return isValidPhoneForRegion(phone, phoneRegion)
+      ? null
+      : phoneErrorMessage(normalizePhoneRegion(phoneRegion));
+  }
+  return isValidPhone(phone) ? null : 'Enter a valid phone number for Nepal, US, or Canada.';
+}
+
 function customerMatchKey(name, phone) {
   return `${String(name || '').trim().toLowerCase()}|${String(phone || '').trim()}`;
 }
@@ -246,10 +261,6 @@ function upsertCustomerInStore(store, payload) {
 }
 
 function goldRateForValuation(metals) {
-  if (metals.live) {
-    const factor = DISPLAY_CURRENCY_NPR_PER_UNIT[metals.currency] || DISPLAY_CURRENCY_NPR_PER_UNIT.USD;
-    return Math.round(metals.goldRatePerTola * factor);
-  }
   return metals.goldRatePerTola;
 }
 
@@ -271,15 +282,17 @@ async function resolveMetalRates(store) {
   try {
     const metalCurrency = normalizeMetalCurrency(store.settings.currency);
     const live = await getLiveMetalRates(metalCurrency);
+    const rateCurrency = live.currency || metalCurrency;
+    const toNprFactor = DISPLAY_CURRENCY_NPR_PER_UNIT[rateCurrency] || DISPLAY_CURRENCY_NPR_PER_UNIT.USD;
     return {
       live: true,
-      currency: live.currency || metalCurrency,
+      currency: rateCurrency,
       source: live.source,
       updatedAt: live.updatedAt,
-      goldRatePerTola: live.gold.perTola,
-      goldRatePerGram: live.gold.perGram,
-      silverRatePerTola: live.silver.perTola,
-      silverRatePerGram: live.silver.perGram
+      goldRatePerTola: live.gold.perTola * toNprFactor,
+      goldRatePerGram: live.gold.perGram * toNprFactor,
+      silverRatePerTola: live.silver.perTola * toNprFactor,
+      silverRatePerGram: live.silver.perGram * toNprFactor
     };
   } catch (err) {
     console.warn('Live metal rates:', err.message);
@@ -741,8 +754,10 @@ app.post('/api/auth/signup', asyncRoute(async (req, res) => {
   if (email && !isValidEmail(email)) {
     return res.status(400).json({ error: 'Enter a valid email address.' });
   }
-  if (phone && !isValidPhone(phone)) {
-    return res.status(400).json({ error: 'Enter a valid Nepal or international phone number.' });
+  if (phone && !isValidPhoneForRegion(phone, req.body?.phoneRegion)) {
+    return res.status(400).json({
+      error: phoneErrorMessage(normalizePhoneRegion(req.body?.phoneRegion))
+    });
   }
   if (!isValidPassword(password)) {
     return res.status(400).json({ error: 'Password must be at least 6 characters.' });
@@ -1374,8 +1389,9 @@ app.post('/api/customers', asyncRoute(async (req, res) => {
   const name = String(req.body.name || '').trim();
   if (!name) return res.status(400).json({ error: 'Customer name is required.' });
   const phone = String(req.body.phone || '').trim();
-  if (phone && !isValidPhone(phone)) {
-    return res.status(400).json({ error: 'Enter a valid Nepal or international phone number.' });
+  const phoneError = validateCustomerPhone(phone, req.body.phoneRegion);
+  if (phoneError) {
+    return res.status(400).json({ error: phoneError });
   }
   const customer = upsertCustomerInStore(store, req.body);
   await writeStore(store, req.userId);
@@ -1392,8 +1408,9 @@ app.post('/api/customers', asyncRoute(async (req, res) => {
 app.post('/api/customers/upsert', asyncRoute(async (req, res) => {
   const store = await readStore(req.userId);
   const phone = String(req.body.phone || '').trim();
-  if (phone && !isValidPhone(phone)) {
-    return res.status(400).json({ error: 'Enter a valid Nepal or international phone number.' });
+  const phoneError = validateCustomerPhone(phone, req.body.phoneRegion);
+  if (phoneError) {
+    return res.status(400).json({ error: phoneError });
   }
   const customer = upsertCustomerInStore(store, req.body);
   if (!customer) return res.status(400).json({ error: 'Customer name is required.' });

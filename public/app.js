@@ -5,12 +5,12 @@ const LAAL_PER_TOLA = AANA_PER_TOLA * LAAL_PER_AANA;
 const fmt = new Intl.NumberFormat('en-NP');
 
 const CURRENCIES = {
-  NPR: { code: 'NPR', label: 'Nepalese Rupee (रू)', nprPerUnit: 1, locale: 'en-NP' },
-  USD: { code: 'USD', label: 'US Dollar ($)', nprPerUnit: 133, locale: 'en-US' },
-  CAD: { code: 'CAD', label: 'Canadian Dollar (CA$)', nprPerUnit: 98, locale: 'en-CA' }
+  NPR: { code: 'NPR', label: 'NPR — Nepalese Rupee (रू)', nprPerUnit: 1, locale: 'en-NP' },
+  USD: { code: 'USD', label: 'USD — US Dollar ($)', nprPerUnit: 133, locale: 'en-US' },
+  CAD: { code: 'CAD', label: 'CAD — Canadian Dollar (CA$)', nprPerUnit: 98, locale: 'en-CA' }
 };
 
-let displayCurrency = 'USD';
+let displayCurrency = 'NPR';
 const moneyFormatters = {};
 const THEME_STORAGE_KEY = 'subarnapasal.theme';
 
@@ -55,7 +55,7 @@ function updateThemeToggleUI() {
 }
 
 function getCurrency() {
-  return CURRENCIES[displayCurrency] || CURRENCIES.USD;
+  return CURRENCIES[displayCurrency] || CURRENCIES.NPR;
 }
 
 function currencyCode() {
@@ -103,7 +103,26 @@ function labelWithCurrency(key) {
 }
 
 function setDisplayCurrency(code) {
-  displayCurrency = CURRENCIES[code] ? code : 'USD';
+  displayCurrency = CURRENCIES[code] ? code : 'NPR';
+}
+
+function metalApiQueryCurrency() {
+  const code = currencyCode();
+  return code === 'NPR' ? 'USD' : code;
+}
+
+function liveMetalRatesToNpr(live) {
+  const rateCurrency = live.currency || metalApiQueryCurrency();
+  return {
+    goldPerTola: displayToNprAt(live.gold.perTola, rateCurrency),
+    goldPerGram: displayToNprAt(live.gold.perGram, rateCurrency),
+    silverPerTola: displayToNprAt(live.silver.perTola, rateCurrency),
+    silverPerGram: displayToNprAt(live.silver.perGram, rateCurrency)
+  };
+}
+
+function formatLiveMetalRateLine(metal, perTolaNpr, perGramNpr) {
+  return `${metal}: ${formatMoney(perTolaNpr)}/tola · ${formatMoney(perGramNpr)}/g`;
 }
 
 function initCurrencySelect() {
@@ -803,16 +822,15 @@ function updateMetalRateHeaderFromLive(live) {
   const goldEl = document.getElementById('metal-rate-gold');
   const silverEl = document.getElementById('metal-rate-silver');
   const bodyEl = document.getElementById('metal-rates-body');
+  const rates = liveMetalRatesToNpr(live);
   if (bodyEl) bodyEl.hidden = true;
   if (goldEl) {
     goldEl.hidden = false;
-    goldEl.textContent =
-      `Gold: ${formatCurrencyAmount(live.gold.perTola)}/tola · ${formatCurrencyAmount(live.gold.perGram)}/g`;
+    goldEl.textContent = formatLiveMetalRateLine('Gold', rates.goldPerTola, rates.goldPerGram);
   }
   if (silverEl) {
     silverEl.hidden = false;
-    silverEl.textContent =
-      `Silver: ${formatCurrencyAmount(live.silver.perTola)}/tola · ${formatCurrencyAmount(live.silver.perGram)}/g`;
+    silverEl.textContent = formatLiveMetalRateLine('Silver', rates.silverPerTola, rates.silverPerGram);
   }
 }
 
@@ -823,11 +841,12 @@ async function captureLiveDailyRate() {
 
   if (mode === 'api') {
     try {
-      const live = await api(`/api/metal-rates?currency=${encodeURIComponent(currencyCode())}`);
-      tolaNpr = displayToNpr(live.gold.perTola);
-      gramNpr = displayToNpr(live.gold.perGram);
+      const live = await api(`/api/metal-rates?currency=${encodeURIComponent(metalApiQueryCurrency())}`);
+      const rates = liveMetalRatesToNpr(live);
+      tolaNpr = rates.goldPerTola;
+      gramNpr = rates.goldPerGram;
       goldRateCache = tolaNpr;
-      silverRateCache = displayToNpr(live.silver.perTola);
+      silverRateCache = rates.silverPerTola;
       updateMetalRateHeaderFromLive(live);
       refreshMetalPriceFields();
       updateGoldCalculator();
@@ -1569,9 +1588,11 @@ let orderItemsCache = [];
 let posItemsCache = [];
 let goldRateCache = 0;
 let goldBuyRateCache = 0;
+let goldCalcBuy2RateCache = 0;
+const CALC_BUY2_RATE_STORAGE_KEY = 'subarnapasal.calcGoldBuy2RateTola';
 let silverRateCache = 0;
 const calcRateDraftNpr = {
-  gold: { sell: null, buy: null },
+  gold: { sell: null, buy: null, buy2: null },
   silver: { sell: null }
 };
 let settingsPriceMode = 'manual';
@@ -2098,7 +2119,40 @@ function getCalcMetal() {
 
 function getCalcPriceType() {
   if (getCalcMetal() !== 'gold') return 'sell';
-  return document.getElementById('calc-price-type')?.value === 'buy' ? 'buy' : 'sell';
+  const value = document.getElementById('calc-price-type')?.value;
+  if (value === 'buy2') return 'buy2';
+  if (value === 'buy') return 'buy';
+  return 'sell';
+}
+
+function loadCalcBuy2RateCache() {
+  try {
+    const raw = localStorage.getItem(CALC_BUY2_RATE_STORAGE_KEY);
+    const n = Number(raw);
+    goldCalcBuy2RateCache = Number.isFinite(n) && n >= 0 ? n : 0;
+  } catch (_) {
+    goldCalcBuy2RateCache = 0;
+  }
+}
+
+function saveCalcBuy2RateCache(tolaNpr) {
+  goldCalcBuy2RateCache = Math.max(0, Number(tolaNpr) || 0);
+  try {
+    localStorage.setItem(CALC_BUY2_RATE_STORAGE_KEY, String(goldCalcBuy2RateCache));
+  } catch (_) { /* ignore */ }
+}
+
+function calcRateInputToTolaNpr() {
+  const rateInput = document.getElementById('gold-calc-rate');
+  if (!rateInput?.value) return 0;
+  const npr = parseMoneyField(rateInput.value);
+  if (!npr) return 0;
+  return getCalcUseGram() ? npr * TOLA_GRAMS : npr;
+}
+
+function persistCalcBuy2RateFromInput() {
+  if (getCalcMetal() !== 'gold' || getCalcPriceType() !== 'buy2') return;
+  saveCalcBuy2RateCache(calcRateInputToTolaNpr());
 }
 
 function getCalcRateDraft(metal, priceType) {
@@ -2110,7 +2164,9 @@ function getCalcRateDraft(metal, priceType) {
 
 function setCalcRateDraft(metal, priceType, value) {
   if (!calcRateDraftNpr[metal]) {
-    calcRateDraftNpr[metal] = metal === 'silver' ? { sell: null } : { sell: null, buy: null };
+    calcRateDraftNpr[metal] = metal === 'silver'
+      ? { sell: null }
+      : { sell: null, buy: null, buy2: null };
   }
   if (metal === 'silver') calcRateDraftNpr[metal].sell = value;
   else calcRateDraftNpr[metal][priceType] = value;
@@ -2118,7 +2174,10 @@ function setCalcRateDraft(metal, priceType, value) {
 
 function getCalcMetalRateCache() {
   if (getCalcMetal() === 'silver') return silverRateCache;
-  return getCalcPriceType() === 'buy' ? goldBuyRateCache : goldRateCache;
+  const priceType = getCalcPriceType();
+  if (priceType === 'buy2') return goldCalcBuy2RateCache;
+  if (priceType === 'buy') return goldBuyRateCache;
+  return goldRateCache;
 }
 
 function getCalcUseGram() {
@@ -2130,7 +2189,9 @@ function getCalcUseGram() {
 function getCalcRateLabelKey(useGram) {
   const metal = getCalcMetal();
   if (metal === 'silver') return useGram ? 'silverRateGram' : 'silverRateTola';
-  if (getCalcPriceType() === 'buy') return useGram ? 'goldBuyRateGram' : 'goldBuyRateTola';
+  const priceType = getCalcPriceType();
+  if (priceType === 'buy2') return useGram ? 'goldCalcBuy2RateGram' : 'goldCalcBuy2RateTola';
+  if (priceType === 'buy') return useGram ? 'goldBuyRateGram' : 'goldBuyRateTola';
   return useGram ? 'goldRateGram' : 'goldRateTola';
 }
 
@@ -2350,7 +2411,12 @@ function renderGoldPriceResult() {
     weightRows = `<tr><th>${t('calcWeightTimesRate')}</th><td>${weightLabel} × ${formatMoney(rateNpr)} = ${formatMoney(goldValueNpr)}</td></tr>`;
   }
   const totalNpr = goldValueNpr + makingNpr;
-  const totalLabel = getCalcPriceType() === 'buy' ? t('calcTotalBuyPrice') : t('calcTotalSellPrice');
+  const priceType = getCalcPriceType();
+  const totalLabel = priceType === 'buy2'
+    ? t('calcTotalBuy2Price')
+    : priceType === 'buy'
+      ? t('calcTotalBuyPrice')
+      : t('calcTotalSellPrice');
   box.innerHTML = `
     <table class="gold-calc-table gold-price-summary">
       <tbody>
@@ -2388,6 +2454,7 @@ function initGoldCalculator() {
   const view = document.getElementById('view-calculator');
   if (!view || view.dataset.goldCalcBound) return;
   view.dataset.goldCalcBound = '1';
+  loadCalcBuy2RateCache();
   const bindWeightEntry = (entry) => {
     initWeightEntry(entry);
     entry.addEventListener('weight-updated', updateGoldCalculator);
@@ -2398,6 +2465,7 @@ function initGoldCalculator() {
   rateInput?.addEventListener('input', () => {
     if (rateInput) rateInput.dataset.userEdited = '1';
     persistCalcRateDraft();
+    persistCalcBuy2RateFromInput();
     updateGoldCalculator();
   });
   document.getElementById('gold-calc-making-charge')?.addEventListener('input', updateGoldCalculator);
@@ -2803,19 +2871,18 @@ async function updateMetalRates(settings = {}) {
 
   if (priceMode === 'api') {
     try {
-      const live = await api(`/api/metal-rates?currency=${encodeURIComponent(currencyCode())}`);
-      goldRateCache = displayToNpr(live.gold.perTola);
-      silverRateCache = displayToNpr(live.silver.perTola);
+      const live = await api(`/api/metal-rates?currency=${encodeURIComponent(metalApiQueryCurrency())}`);
+      const rates = liveMetalRatesToNpr(live);
+      goldRateCache = rates.goldPerTola;
+      silverRateCache = rates.silverPerTola;
       if (bodyEl) bodyEl.hidden = true;
       if (goldEl) {
         goldEl.hidden = false;
-        goldEl.textContent =
-          `Gold: ${formatCurrencyAmount(live.gold.perTola)}/tola · ${formatCurrencyAmount(live.gold.perGram)}/g`;
+        goldEl.textContent = formatLiveMetalRateLine('Gold', rates.goldPerTola, rates.goldPerGram);
       }
       if (silverEl) {
         silverEl.hidden = false;
-        silverEl.textContent =
-          `Silver: ${formatCurrencyAmount(live.silver.perTola)}/tola · ${formatCurrencyAmount(live.silver.perGram)}/g`;
+        silverEl.textContent = formatLiveMetalRateLine('Silver', rates.silverPerTola, rates.silverPerGram);
       }
       const onDailySettings = activeView === 'settings' && currentRateHistoryPeriod() === 'daily';
       if (!onDailySettings) {
@@ -3143,7 +3210,7 @@ async function loadSettings() {
     goldBuyRatePerTola: settings.goldBuyRatePerTola || 0,
     silverRatePerTola: settings.silverRatePerTola
   };
-  setDisplayCurrency(settings.currency || 'USD');
+  setDisplayCurrency(settings.currency || 'NPR');
   initCurrencySelect();
   const storeForm = document.getElementById('settings-store-form');
   const priceForm = document.getElementById('settings-form');
@@ -4803,6 +4870,14 @@ function initDateDefaults() {
 function changeLanguage(lang) {
   setLanguage(lang);
   updateThemeToggleUI();
+  if (typeof applyPhoneRegionUI === 'function') {
+    applyPhoneRegionUI(
+      document.getElementById('customer-phone-region'),
+      document.getElementById('customer-phone-input'),
+      document.getElementById('customer-phone-hint'),
+      'customer'
+    );
+  }
   refreshAll().then(() => toast(t('languageSaved'))).catch((err) => toast(err.message));
 }
 
@@ -5147,8 +5222,11 @@ document.getElementById('customer-form')?.addEventListener('submit', async (e) =
   e.preventDefault();
   const fd = new FormData(e.target);
   const phone = String(fd.get('phone') || '').trim();
-  if (phone && typeof isValidPhone === 'function' && !isValidPhone(phone)) {
-    toast(t('authInvalidPhone'));
+  const phoneRegion = typeof getPhoneRegionFromSelect === 'function'
+    ? getPhoneRegionFromSelect('customer-phone-region')
+    : 'NP';
+  if (phone && typeof isValidPhoneForRegion === 'function' && !isValidPhoneForRegion(phone, phoneRegion)) {
+    toast(typeof phoneInvalidMessage === 'function' ? phoneInvalidMessage(phoneRegion) : t('authInvalidPhone'));
     return;
   }
   try {
@@ -5157,6 +5235,7 @@ document.getElementById('customer-form')?.addEventListener('submit', async (e) =
       body: JSON.stringify({
         name: fd.get('name'),
         phone: fd.get('phone'),
+        phoneRegion,
         email: fd.get('email') || '',
         address: fd.get('address') || ''
       })
@@ -5396,6 +5475,12 @@ renderAllCategorySelects();
 initAllWeightEntries();
 initGoldCalculator();
 initQuickCalculator();
+initPhoneRegionUI({
+  regionSelectId: 'customer-phone-region',
+  phoneInputId: 'customer-phone-input',
+  hintId: 'customer-phone-hint',
+  hintMode: 'customer'
+});
 document.getElementById('order-item-select')?.addEventListener('change', updateOrderTotalPreview);
 document.querySelector('#order-form [name="quantity"]')?.addEventListener('input', updateOrderTotalPreview);
 
@@ -5458,6 +5543,7 @@ async function initApp() {
   initTheme();
   setLanguage(currentLang);
   updateThemeToggleUI();
+  initCurrencySelect();
   if (typeof waitForAuthReady === 'function') await waitForAuthReady();
 
   const authRequired = typeof isAuthRequired === 'function' && isAuthRequired();

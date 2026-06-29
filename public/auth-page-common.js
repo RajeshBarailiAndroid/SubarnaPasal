@@ -11,6 +11,10 @@ function initAuthPageLanguage(titleKey) {
     applyStaticI18n();
     document.title = `${t(titleKey)} — Suvarnapasal`;
     if (langSelect) langSelect.value = currentLang;
+    const regionSel = document.getElementById('signup-phone-region');
+    if (regionSel && typeof applyPhoneRegionUI === 'function') {
+      applyPhoneRegionUI(regionSel, document.getElementById('signup-phone'), document.getElementById('signup-phone-hint'));
+    }
   });
 }
 

@@ -422,8 +422,8 @@ async function handleSignupSubmit(e) {
     showAuthError('signup', t('authInvalidEmail'));
     return;
   }
-  if (phone && !isValidPhone(phone)) {
-    showAuthError('signup', t('authInvalidPhone'));
+  if (phone && !isValidPhoneForRegion(phone, getPhoneRegionFromSelect('signup-phone-region'))) {
+    showAuthError('signup', phoneInvalidMessage(getPhoneRegionFromSelect('signup-phone-region')));
     return;
   }
   if (!isValidPassword(password)) {
@@ -443,7 +443,14 @@ async function handleSignupSubmit(e) {
     const res = await fetch('/api/auth/signup', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, full_name: fullName, email, phone, password })
+      body: JSON.stringify({
+        username,
+        full_name: fullName,
+        email,
+        phone,
+        phoneRegion: getPhoneRegionFromSelect('signup-phone-region'),
+        password
+      })
     });
     const payload = await res.json().catch(() => ({}));
 
