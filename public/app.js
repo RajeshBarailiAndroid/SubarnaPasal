@@ -1389,6 +1389,7 @@ function syncSettingsGoldBuyRateFromGram() {
   const tolaNpr = parseTolaFromGramInput(gramInput.value);
   tolaInput.value = formatTolaRateInput(tolaNpr);
   metalRateSyncLock = false;
+  syncManualRatesFromForm();
 }
 
 function syncSettingsGoldBuyRateFromTola() {
@@ -1400,6 +1401,7 @@ function syncSettingsGoldBuyRateFromTola() {
   const tolaNpr = parseTolaRateInput(tolaInput.value);
   gramInput.value = formatGramRateFromTola(tolaNpr);
   metalRateSyncLock = false;
+  syncManualRatesFromForm();
 }
 
 function syncSettingsSilverRateFromGram() {

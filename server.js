@@ -1231,11 +1231,9 @@ app.patch('/api/settings', asyncRoute(async (req, res) => {
 
   store.settings.updatedAt = now;
   store.settings.goldRatePerGram = Number((store.settings.goldRatePerTola / TOLA_GRAMS).toFixed(2));
-  if (store.settings.goldBuyRatePerTola > 0) {
-    store.settings.goldBuyRatePerGram = Number(
-      (store.settings.goldBuyRatePerTola / TOLA_GRAMS).toFixed(2)
-    );
-  }
+  store.settings.goldBuyRatePerGram = Number(
+    (store.settings.goldBuyRatePerTola / TOLA_GRAMS).toFixed(2)
+  );
   normalizeSilverRates(store.settings);
   await writeStore(store, req.userId);
   const shared = await readSharedRates();
