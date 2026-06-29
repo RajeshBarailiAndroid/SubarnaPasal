@@ -55,7 +55,7 @@ const TOLA_GRAMS = 11.66;
 const AANA_PER_TOLA = 16;
 const LAAL_PER_AANA = 6.25;
 const LAAL_PER_TOLA = AANA_PER_TOLA * LAAL_PER_AANA;
-const DISPLAY_CURRENCY_NPR_PER_UNIT = { USD: 133, CAD: 98 };
+const DISPLAY_CURRENCY_NPR_PER_UNIT = { USD: 133, CAD: 98, NPR: 1 };
 const PUBLIC_API_PATHS = new Set([
   '/api/health',
   '/api/auth/config',
@@ -742,7 +742,7 @@ app.post('/api/auth/signup', asyncRoute(async (req, res) => {
     return res.status(400).json({ error: 'Enter a valid email address.' });
   }
   if (phone && !isValidPhone(phone)) {
-    return res.status(400).json({ error: 'Enter a valid phone number (at least 10 digits).' });
+    return res.status(400).json({ error: 'Enter a valid Nepal or international phone number.' });
   }
   if (!isValidPassword(password)) {
     return res.status(400).json({ error: 'Password must be at least 6 characters.' });
@@ -1110,6 +1110,7 @@ app.get('/api/settings', asyncRoute(async (req, res) => {
     locations: getStoreLocations(store),
     itemCategories: getStoreItemCategories(store),
     goldRatePerGram: Number((settings.goldRatePerTola / TOLA_GRAMS).toFixed(2)),
+    goldBuyRatePerGram: Number((settings.goldBuyRatePerTola / TOLA_GRAMS).toFixed(2)),
     rateHistory: shared.history || []
   });
 }));
@@ -1162,6 +1163,19 @@ app.patch('/api/settings', asyncRoute(async (req, res) => {
     });
   }
 
+  if (req.body.goldBuyRatePerTola != null) {
+    const buyRate = Number(req.body.goldBuyRatePerTola);
+    if (!Number.isFinite(buyRate) || buyRate < 0) {
+      return res.status(400).json({ error: 'Gold buy rate must be a valid number.' });
+    }
+    store.settings.goldBuyRatePerTola = buyRate;
+    store.settings.goldBuyRatePerGram = Number((buyRate / TOLA_GRAMS).toFixed(2));
+  } else if (req.body.goldBuyRatePerGram != null) {
+    const perGram = Number(req.body.goldBuyRatePerGram) || 0;
+    store.settings.goldBuyRatePerGram = perGram;
+    store.settings.goldBuyRatePerTola = Number((perGram * TOLA_GRAMS).toFixed(2));
+  }
+
   if (req.body.shopName != null) {
     const name = String(req.body.shopName).trim();
     if (!name) return res.status(400).json({ error: 'Shop name is required.' });
@@ -1194,7 +1208,7 @@ app.patch('/api/settings', asyncRoute(async (req, res) => {
   }
 
   if (req.body.currency != null) {
-    const allowed = ['USD', 'CAD'];
+    const allowed = ['USD', 'CAD', 'NPR'];
     const code = String(req.body.currency).toUpperCase();
     if (allowed.includes(code)) store.settings.currency = code;
   }
@@ -1217,6 +1231,11 @@ app.patch('/api/settings', asyncRoute(async (req, res) => {
 
   store.settings.updatedAt = now;
   store.settings.goldRatePerGram = Number((store.settings.goldRatePerTola / TOLA_GRAMS).toFixed(2));
+  if (store.settings.goldBuyRatePerTola > 0) {
+    store.settings.goldBuyRatePerGram = Number(
+      (store.settings.goldBuyRatePerTola / TOLA_GRAMS).toFixed(2)
+    );
+  }
   normalizeSilverRates(store.settings);
   await writeStore(store, req.userId);
   const shared = await readSharedRates();
@@ -1224,6 +1243,7 @@ app.patch('/api/settings', asyncRoute(async (req, res) => {
     ...store.settings,
     locations: getStoreLocations(store),
     itemCategories: getStoreItemCategories(store),
+    goldBuyRatePerGram: Number((store.settings.goldBuyRatePerTola / TOLA_GRAMS).toFixed(2)),
     rateHistory: shared.history || []
   });
 }));
@@ -1355,6 +1375,10 @@ app.post('/api/customers', asyncRoute(async (req, res) => {
   const store = await readStore(req.userId);
   const name = String(req.body.name || '').trim();
   if (!name) return res.status(400).json({ error: 'Customer name is required.' });
+  const phone = String(req.body.phone || '').trim();
+  if (phone && !isValidPhone(phone)) {
+    return res.status(400).json({ error: 'Enter a valid Nepal or international phone number.' });
+  }
   const customer = upsertCustomerInStore(store, req.body);
   await writeStore(store, req.userId);
   const purchaseCounts = computeCustomerPurchaseCounts(store);
@@ -1369,6 +1393,10 @@ app.post('/api/customers', asyncRoute(async (req, res) => {
 
 app.post('/api/customers/upsert', asyncRoute(async (req, res) => {
   const store = await readStore(req.userId);
+  const phone = String(req.body.phone || '').trim();
+  if (phone && !isValidPhone(phone)) {
+    return res.status(400).json({ error: 'Enter a valid Nepal or international phone number.' });
+  }
   const customer = upsertCustomerInStore(store, req.body);
   if (!customer) return res.status(400).json({ error: 'Customer name is required.' });
   await writeStore(store, req.userId);

@@ -19,6 +19,8 @@ create table if not exists settings (
   price_mode text default 'manual',
   gold_rate_per_tola numeric default 0,
   gold_rate_per_gram numeric default 0,
+  gold_buy_rate_per_tola numeric default 0,
+  gold_buy_rate_per_gram numeric default 0,
   silver_rate_per_tola numeric default 0,
   silver_rate_per_gram numeric default 0,
   currency text default 'USD',

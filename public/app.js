@@ -5,6 +5,7 @@ const LAAL_PER_TOLA = AANA_PER_TOLA * LAAL_PER_AANA;
 const fmt = new Intl.NumberFormat('en-NP');
 
 const CURRENCIES = {
+  NPR: { code: 'NPR', label: 'Nepalese Rupee (रू)', nprPerUnit: 1, locale: 'en-NP' },
   USD: { code: 'USD', label: 'US Dollar ($)', nprPerUnit: 133, locale: 'en-US' },
   CAD: { code: 'CAD', label: 'Canadian Dollar (CA$)', nprPerUnit: 98, locale: 'en-CA' }
 };
@@ -1014,6 +1015,8 @@ function readManualRatesFromForm() {
     return {
       goldRatePerTola: goldRateCache,
       goldRatePerGram: Number((goldRateCache / TOLA_GRAMS).toFixed(2)),
+      goldBuyRatePerTola: goldBuyRateCache,
+      goldBuyRatePerGram: Number((goldBuyRateCache / TOLA_GRAMS).toFixed(2)),
       silverRatePerTola: silverRateCache,
       silverRatePerGram: Number((silverRateCache / TOLA_GRAMS).toFixed(2))
     };
@@ -1021,12 +1024,17 @@ function readManualRatesFromForm() {
   const goldRatePerTola = parseTolaRateInput(priceForm.goldRatePerTola?.value)
     || parseTolaFromGramInput(priceForm.goldRatePerGram?.value)
     || goldRateCache;
+  const goldBuyRatePerTola = parseTolaRateInput(priceForm.goldBuyRatePerTola?.value)
+    || parseTolaFromGramInput(priceForm.goldBuyRatePerGram?.value)
+    || goldBuyRateCache;
   const silverRatePerTola = parseTolaRateInput(priceForm.silverRatePerTola?.value)
     || parseTolaFromGramInput(priceForm.silverRatePerGram?.value)
     || silverRateCache;
   return {
     goldRatePerTola,
     goldRatePerGram: Number((goldRatePerTola / TOLA_GRAMS).toFixed(2)),
+    goldBuyRatePerTola,
+    goldBuyRatePerGram: Number((goldBuyRatePerTola / TOLA_GRAMS).toFixed(2)),
     silverRatePerTola,
     silverRatePerGram: Number((silverRatePerTola / TOLA_GRAMS).toFixed(2))
   };
@@ -1372,6 +1380,28 @@ function syncSettingsGoldRateFromTola() {
   syncManualRatesFromForm();
 }
 
+function syncSettingsGoldBuyRateFromGram() {
+  if (metalRateSyncLock) return;
+  const gramInput = document.querySelector('#settings-form [name="goldBuyRatePerGram"]');
+  const tolaInput = document.querySelector('#settings-form [name="goldBuyRatePerTola"]');
+  if (!gramInput || !tolaInput) return;
+  metalRateSyncLock = true;
+  const tolaNpr = parseTolaFromGramInput(gramInput.value);
+  tolaInput.value = formatTolaRateInput(tolaNpr);
+  metalRateSyncLock = false;
+}
+
+function syncSettingsGoldBuyRateFromTola() {
+  if (metalRateSyncLock) return;
+  const gramInput = document.querySelector('#settings-form [name="goldBuyRatePerGram"]');
+  const tolaInput = document.querySelector('#settings-form [name="goldBuyRatePerTola"]');
+  if (!gramInput || !tolaInput) return;
+  metalRateSyncLock = true;
+  const tolaNpr = parseTolaRateInput(tolaInput.value);
+  gramInput.value = formatGramRateFromTola(tolaNpr);
+  metalRateSyncLock = false;
+}
+
 function syncSettingsSilverRateFromGram() {
   if (metalRateSyncLock) return;
   const gramInput = document.querySelector('#settings-form [name="silverRatePerGram"]');
@@ -1403,10 +1433,13 @@ function refreshMetalPriceFields() {
     ? readManualRatesFromForm()
     : {
       goldRatePerTola: goldRateCache,
+      goldBuyRatePerTola: goldBuyRateCache,
       silverRatePerTola: silverRateCache
     };
   const goldGramField = priceForm.goldRatePerGram;
   const goldTolaField = priceForm.goldRatePerTola;
+  const goldBuyGramField = priceForm.goldBuyRatePerGram;
+  const goldBuyTolaField = priceForm.goldBuyRatePerTola;
   const silverGramField = priceForm.silverRatePerGram;
   const silverTolaField = priceForm.silverRatePerTola;
   const rateStep = currencyCode() === 'NPR' ? '1' : '0.01';
@@ -1417,6 +1450,14 @@ function refreshMetalPriceFields() {
   if (goldTolaField) {
     goldTolaField.value = formatTolaRateInput(metal.goldRatePerTola);
     goldTolaField.step = rateStep;
+  }
+  if (goldBuyGramField) {
+    goldBuyGramField.value = formatGramRateFromTola(metal.goldBuyRatePerTola || goldBuyRateCache);
+    goldBuyGramField.step = rateStep;
+  }
+  if (goldBuyTolaField) {
+    goldBuyTolaField.value = formatTolaRateInput(metal.goldBuyRatePerTola || goldBuyRateCache);
+    goldBuyTolaField.step = rateStep;
   }
   if (silverGramField) {
     silverGramField.value = formatGramRateFromTola(metal.silverRatePerTola);
@@ -1525,8 +1566,12 @@ let ordersAllCache = [];
 let orderItemsCache = [];
 let posItemsCache = [];
 let goldRateCache = 0;
+let goldBuyRateCache = 0;
 let silverRateCache = 0;
-const calcRateDraftNpr = { gold: null, silver: null };
+const calcRateDraftNpr = {
+  gold: { sell: null, buy: null },
+  silver: { sell: null }
+};
 let settingsPriceMode = 'manual';
 let locationsCache = [];
 let itemCategoriesCache = [...DEFAULT_ITEM_CATEGORIES];
@@ -1537,6 +1582,7 @@ let settingsCache = {
   priceMode: 'manual',
   currency: 'USD',
   goldRatePerTola: 0,
+  goldBuyRatePerTola: 0,
   silverRatePerTola: 0
 };
 let rateHistoryCache = [];
@@ -2048,8 +2094,29 @@ function getCalcMetal() {
   return document.getElementById('calc-metal')?.value === 'silver' ? 'silver' : 'gold';
 }
 
+function getCalcPriceType() {
+  if (getCalcMetal() !== 'gold') return 'sell';
+  return document.getElementById('calc-price-type')?.value === 'buy' ? 'buy' : 'sell';
+}
+
+function getCalcRateDraft(metal, priceType) {
+  const slot = calcRateDraftNpr[metal];
+  if (!slot) return null;
+  if (metal === 'silver') return slot.sell;
+  return slot[priceType] ?? null;
+}
+
+function setCalcRateDraft(metal, priceType, value) {
+  if (!calcRateDraftNpr[metal]) {
+    calcRateDraftNpr[metal] = metal === 'silver' ? { sell: null } : { sell: null, buy: null };
+  }
+  if (metal === 'silver') calcRateDraftNpr[metal].sell = value;
+  else calcRateDraftNpr[metal][priceType] = value;
+}
+
 function getCalcMetalRateCache() {
-  return getCalcMetal() === 'silver' ? silverRateCache : goldRateCache;
+  if (getCalcMetal() === 'silver') return silverRateCache;
+  return getCalcPriceType() === 'buy' ? goldBuyRateCache : goldRateCache;
 }
 
 function getCalcUseGram() {
@@ -2061,21 +2128,23 @@ function getCalcUseGram() {
 function getCalcRateLabelKey(useGram) {
   const metal = getCalcMetal();
   if (metal === 'silver') return useGram ? 'silverRateGram' : 'silverRateTola';
+  if (getCalcPriceType() === 'buy') return useGram ? 'goldBuyRateGram' : 'goldBuyRateTola';
   return useGram ? 'goldRateGram' : 'goldRateTola';
 }
 
 function persistCalcRateDraft() {
   const rateInput = document.getElementById('gold-calc-rate');
   if (!rateInput || rateInput.dataset.userEdited !== '1' || !rateInput.value) return;
-  calcRateDraftNpr[getCalcMetal()] = parseMoneyField(rateInput.value);
+  setCalcRateDraft(getCalcMetal(), getCalcPriceType(), parseMoneyField(rateInput.value));
 }
 
 function applyCalcRateField() {
   const rateInput = document.getElementById('gold-calc-rate');
   if (!rateInput) return;
   const metal = getCalcMetal();
+  const priceType = getCalcPriceType();
   const useGram = getCalcUseGram();
-  const draft = calcRateDraftNpr[metal];
+  const draft = getCalcRateDraft(metal, priceType);
   if (draft != null && draft > 0) {
     rateInput.value = useGram ? formatRateInput(draft) : formatMoneyField(draft);
     rateInput.dataset.userEdited = '1';
@@ -2083,6 +2152,17 @@ function applyCalcRateField() {
   }
   rateInput.dataset.userEdited = '';
   syncGoldCalcRateField();
+}
+
+function syncCalcPriceTypeVisibility() {
+  const wrap = document.getElementById('calc-price-type-wrap');
+  if (!wrap) return;
+  const isGold = getCalcMetal() === 'gold';
+  wrap.hidden = !isGold;
+  if (!isGold) {
+    const sel = document.getElementById('calc-price-type');
+    if (sel) sel.value = 'sell';
+  }
 }
 
 function syncGoldCalcRateUnitFromWeight() {
@@ -2147,7 +2227,7 @@ function refreshGoldCalcForCurrency(prevCurrency) {
   if (rateInput) {
     if (rateInput.dataset.userEdited === '1' && rateInput.value) {
       const rateNpr = displayToNprAt(rateInput.value, prevCurrency);
-      calcRateDraftNpr[getCalcMetal()] = rateNpr;
+      setCalcRateDraft(getCalcMetal(), getCalcPriceType(), rateNpr);
       rateInput.value = useGram ? formatRateInput(rateNpr) : formatMoneyField(rateNpr);
     } else {
       rateInput.dataset.userEdited = '';
@@ -2268,12 +2348,13 @@ function renderGoldPriceResult() {
     weightRows = `<tr><th>${t('calcWeightTimesRate')}</th><td>${weightLabel} × ${formatMoney(rateNpr)} = ${formatMoney(goldValueNpr)}</td></tr>`;
   }
   const totalNpr = goldValueNpr + makingNpr;
+  const totalLabel = getCalcPriceType() === 'buy' ? t('calcTotalBuyPrice') : t('calcTotalSellPrice');
   box.innerHTML = `
     <table class="gold-calc-table gold-price-summary">
       <tbody>
         ${weightRows}
         <tr><th>${t('calcMakingCharge')}</th><td>${formatMoney(makingNpr)}</td></tr>
-        <tr class="gold-calc-total-row"><th>${t('calcTotalPrice')}</th><td><strong>${formatMoney(totalNpr)}</strong></td></tr>
+        <tr class="gold-calc-total-row"><th>${totalLabel}</th><td><strong>${formatMoney(totalNpr)}</strong></td></tr>
       </tbody>
     </table>`;
 }
@@ -2293,6 +2374,7 @@ function syncGoldCalcRateField() {
 }
 
 function updateGoldCalculator() {
+  syncCalcPriceTypeVisibility();
   syncGoldCalcRateUnitFromWeight();
   updateGoldCalcRateLabel();
   syncGoldCalcRateField();
@@ -2317,7 +2399,15 @@ function initGoldCalculator() {
     updateGoldCalculator();
   });
   document.getElementById('gold-calc-making-charge')?.addEventListener('input', updateGoldCalculator);
+  document.getElementById('calc-price-type')?.addEventListener('change', () => {
+    const rateInput = document.getElementById('gold-calc-rate');
+    if (rateInput) rateInput.dataset.userEdited = '';
+    applyCalcRateField();
+    updateGoldCalculator();
+  });
   document.getElementById('calc-metal')?.addEventListener('change', () => {
+    const rateInput = document.getElementById('gold-calc-rate');
+    if (rateInput) rateInput.dataset.userEdited = '';
     applyCalcRateField();
     updateGoldCalculator();
   });
@@ -3048,6 +3138,7 @@ async function loadSettings() {
     priceMode: settings.priceMode || 'manual',
     currency: settings.currency || 'USD',
     goldRatePerTola: settings.goldRatePerTola,
+    goldBuyRatePerTola: settings.goldBuyRatePerTola || 0,
     silverRatePerTola: settings.silverRatePerTola
   };
   setDisplayCurrency(settings.currency || 'USD');
@@ -3067,11 +3158,16 @@ async function loadSettings() {
     });
   }
   goldRateCache = settings.goldRatePerTola;
+  goldBuyRateCache = settings.goldBuyRatePerTola
+    || (settings.goldBuyRatePerGram
+      ? Number((settings.goldBuyRatePerGram * TOLA_GRAMS).toFixed(2))
+      : 0);
   silverRateCache = settings.silverRatePerTola
     || (settings.silverRatePerGram
       ? Number((settings.silverRatePerGram * TOLA_GRAMS).toFixed(2))
       : 0);
   settingsCache.goldRatePerTola = goldRateCache;
+  settingsCache.goldBuyRatePerTola = goldBuyRateCache;
   settingsCache.silverRatePerTola = silverRateCache;
   rateHistoryCache = (settings.rateHistory || []).map(normalizeRateHistoryRow);
   await loadSharedGoldRates();
@@ -5048,6 +5144,11 @@ document.getElementById('order-form')?.addEventListener('submit', async (e) => {
 document.getElementById('customer-form')?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const fd = new FormData(e.target);
+  const phone = String(fd.get('phone') || '').trim();
+  if (phone && typeof isValidPhone === 'function' && !isValidPhone(phone)) {
+    toast(t('authInvalidPhone'));
+    return;
+  }
   try {
     const payload = await api('/api/customers', {
       method: 'POST',
@@ -5171,12 +5272,14 @@ document.getElementById('settings-form')?.addEventListener('submit', async (e) =
   try {
     const goldRatePerTola = parseTolaRateInput(fd.get('goldRatePerTola'))
       || parseTolaFromGramInput(fd.get('goldRatePerGram'));
+    const goldBuyRatePerTola = parseTolaRateInput(fd.get('goldBuyRatePerTola'))
+      || parseTolaFromGramInput(fd.get('goldBuyRatePerGram') || 0);
     const silverRatePerTola = parseTolaRateInput(fd.get('silverRatePerTola'))
       || parseTolaFromGramInput(fd.get('silverRatePerGram') || 0);
     const priceMode = fd.get('priceMode');
     const saved = await api('/api/settings', {
       method: 'PATCH',
-      body: JSON.stringify({ goldRatePerTola, silverRatePerTola, priceMode })
+      body: JSON.stringify({ goldRatePerTola, goldBuyRatePerTola, silverRatePerTola, priceMode })
     });
     if (Array.isArray(saved.rateHistory)) {
       rateHistoryCache = saved.rateHistory;
@@ -5186,8 +5289,10 @@ document.getElementById('settings-form')?.addEventListener('submit', async (e) =
     settingsPriceMode = priceMode === 'api' ? 'api' : 'manual';
     settingsCache.priceMode = settingsPriceMode;
     settingsCache.goldRatePerTola = goldRatePerTola;
+    settingsCache.goldBuyRatePerTola = goldBuyRatePerTola;
     settingsCache.silverRatePerTola = silverRatePerTola;
     goldRateCache = goldRatePerTola;
+    goldBuyRateCache = goldBuyRatePerTola;
     silverRateCache = silverRatePerTola;
     if (settingsPriceMode === 'api') {
       await updateMetalRates({ priceMode: 'api' });
@@ -5208,6 +5313,8 @@ document.getElementById('settings-form')?.addEventListener('submit', async (e) =
 
 document.querySelector('#settings-form [name="goldRatePerGram"]')?.addEventListener('input', syncSettingsGoldRateFromGram);
 document.querySelector('#settings-form [name="goldRatePerTola"]')?.addEventListener('input', syncSettingsGoldRateFromTola);
+document.querySelector('#settings-form [name="goldBuyRatePerGram"]')?.addEventListener('input', syncSettingsGoldBuyRateFromGram);
+document.querySelector('#settings-form [name="goldBuyRatePerTola"]')?.addEventListener('input', syncSettingsGoldBuyRateFromTola);
 document.querySelector('#settings-form [name="silverRatePerGram"]')?.addEventListener('input', syncSettingsSilverRateFromGram);
 document.querySelector('#settings-form [name="silverRatePerTola"]')?.addEventListener('input', syncSettingsSilverRateFromTola);
 document.getElementById('clear-rate-history-btn')?.addEventListener('click', clearRateHistoryForCurrentMode);

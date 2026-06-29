@@ -413,6 +413,12 @@
                       <option value="silver" data-i18n-option="calcMetalSilver">Silver</option>
                     </select>
                   </label>
+                  <label class="span-2" id="calc-price-type-wrap"><span data-i18n="calcPriceType">Price type</span>
+                    <select id="calc-price-type">
+                      <option value="sell" data-i18n-option="calcPriceSell">Sell price</option>
+                      <option value="buy" data-i18n-option="calcPriceBuy">Buy price</option>
+                    </select>
+                  </label>
                   <label class="span-2"><span data-i18n="calcRateUnit">Rate unit</span>
                     <select id="gold-calc-rate-unit" disabled>
                       <option value="tola" data-i18n-option="calcRatePerTola">Per tola</option>
@@ -498,7 +504,7 @@
                   <label><span data-i18n="displayCurrency">Display currency</span>
                     <select id="currency-select" aria-label="Display currency"></select>
                   </label>
-                  <p class="settings-hint" data-i18n="displayCurrencyDesc">Prices, totals, and live metal rates are shown in USD or CAD.</p>
+                  <p class="settings-hint" data-i18n="displayCurrencyDesc">Prices, totals, and live metal rates are shown in NPR, USD, or CAD.</p>
                 </div>
               </article>
               <article class="panel settings-card span-2">
@@ -510,8 +516,12 @@
                     <label class="radio-label"><input type="radio" name="priceMode" value="api" /><span data-i18n="useLiveApi">Use Live API Price</span></label>
                   </div>
                   <div class="form-grid manual-price-fields">
+                    <p class="settings-subheading span-2" data-i18n="goldSellPriceSection">Gold sell price (manual)</p>
                     <label><span data-currency-field="goldRateGram">Gold rate per gram</span><input name="goldRatePerGram" type="number" min="0" step="0.01" required /></label>
                     <label><span data-currency-field="goldRateTola">Gold rate per tola</span><input name="goldRatePerTola" type="number" min="0" step="0.01" required /></label>
+                    <p class="settings-subheading span-2" data-i18n="goldBuyPriceSection">Gold buy price (manual)</p>
+                    <label><span data-currency-field="goldBuyRateGram">Gold buy rate per gram</span><input name="goldBuyRatePerGram" type="number" min="0" step="0.01" /></label>
+                    <label><span data-currency-field="goldBuyRateTola">Gold buy rate per tola</span><input name="goldBuyRatePerTola" type="number" min="0" step="0.01" /></label>
                     <label><span data-currency-field="silverRateGram">Silver rate per gram</span><input name="silverRatePerGram" type="number" min="0" step="0.01" /></label>
                     <label><span data-currency-field="silverRateTola">Silver rate per tola</span><input name="silverRatePerTola" type="number" min="0" step="0.01" /></label>
                     <p class="settings-hint span-2" data-i18n="metalRateSyncHint">Gram and tola rates stay in sync (1 tola = 11.66 g). Edit either field.</p>
@@ -837,6 +847,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="i18n.js"></script>
     <script src="auth.js"></script>
+    <script src="phone.js"></script>
     <script src="bg-slider.js"></script>
     <script src="hero-carousel.js"></script>
     <script src="app.js"></script>

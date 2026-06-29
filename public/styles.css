@@ -3016,6 +3016,14 @@ th {
   font-size: 1.1rem;
 }
 
+.settings-subheading {
+  margin: 0.35rem 0 0;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--gold-dark);
+  letter-spacing: 0.02em;
+}
+
 .settings-form label {
   display: flex;
   flex-direction: column;

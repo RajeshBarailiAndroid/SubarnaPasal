@@ -51,11 +51,6 @@ function isValidUsername(username) {
   return /^[a-z0-9_]{3,24}$/.test(username);
 }
 
-function isValidPhone(phone) {
-  const digits = String(phone || '').replace(/\D/g, '');
-  return digits.length >= 10 && digits.length <= 15;
-}
-
 function isValidEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim());
 }
