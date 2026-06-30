@@ -1548,17 +1548,20 @@ const ORDER_STATUS_RANK = {
 };
 
 const ORDER_GROUPS = [
-  {
-    id: 'progress',
-    labelKey: 'orderProgress',
-    statuses: ['pending', 'confirmed', 'progress']
-  },
-  { id: 'ready', labelKey: 'orderReady', statuses: ['ready'] },
+  { id: 'new', labelKey: 'orderNew', statuses: ['pending', 'confirmed'] },
+  { id: 'progress', labelKey: 'orderProgress', statuses: ['progress', 'ready'] },
   { id: 'completed', labelKey: 'orderCompleted', statuses: ['completed'] }
 ];
 
 function orderGroupIdForStatus(status) {
   return ORDER_GROUPS.find((g) => g.statuses.includes(status))?.id || null;
+}
+
+function orderGroupTargetStatus(groupId) {
+  if (groupId === 'new') return 'pending';
+  if (groupId === 'progress') return 'progress';
+  if (groupId === 'completed') return 'completed';
+  return 'pending';
 }
 
 function sortOrdersForDisplay(orders) {
@@ -1620,7 +1623,7 @@ let lastSaleBill = null;
 let activeView = 'pos';
 let posCart = [];
 let reportTab = 'sales';
-let orderGroup = 'progress';
+let orderGroup = 'new';
 let reportCache = null;
 let selectedCustomer = null;
 let customersCache = [];
@@ -2812,16 +2815,13 @@ function txTypeLabel(type) {
 }
 
 function orderStatusBadge(status) {
-  const map = {
-    pending: ['orderPending', 'pending'],
-    confirmed: ['orderConfirmed', 'confirmed'],
-    progress: ['orderProgress', 'progress'],
-    ready: ['orderReady', 'ready'],
-    completed: ['orderCompleted', 'completed'],
-    cancelled: ['orderCancelled', 'cancelled']
-  };
-  const [key, cls] = map[status] || ['orderPending', 'pending'];
-  return `<span class="badge order-${cls}">${t(key)}</span>`;
+  if (status === 'cancelled') {
+    return `<span class="badge order-cancelled">${t('orderCancelled')}</span>`;
+  }
+  const groupId = orderGroupIdForStatus(status);
+  const group = ORDER_GROUPS.find((g) => g.id === groupId);
+  if (!group) return `<span class="badge order-new">${t('orderNew')}</span>`;
+  return `<span class="badge order-${group.id}">${t(group.labelKey)}</span>`;
 }
 
 function orderCancelButton(id) {
@@ -2834,26 +2834,14 @@ function orderActionButtons(order) {
   if (order.status === 'completed') {
     actions.push(`<button type="button" class="order-cart-btn" data-order-cart="${id}" title="${t('addCart')}" aria-label="${t('addCart')}">${cartIcon()}</button>`);
   }
-  if (order.status === 'pending') {
-    actions.push(`<button type="button" class="link-btn" data-order-action="confirmed" data-order-id="${id}">${t('confirmOrder')}</button>`);
-    actions.push(`<button type="button" class="link-btn" data-order-action="progress" data-order-id="${id}">${t('markProgress')}</button>`);
-  }
-  if (order.status === 'confirmed') {
-    actions.push(`<button type="button" class="link-btn" data-order-action="progress" data-order-id="${id}">${t('markProgress')}</button>`);
-    actions.push(`<button type="button" class="link-btn" data-order-action="ready" data-order-id="${id}">${t('markReady')}</button>`);
-  }
-  if (order.status === 'progress') {
-    actions.push(`<button type="button" class="link-btn" data-order-action="ready" data-order-id="${id}">${t('markReady')}</button>`);
-  }
-  if (order.status === 'ready') {
-    actions.push(`<button type="button" class="link-btn" data-order-action="progress" data-order-id="${id}">${t('orderProgress')}</button>`);
-  }
-  if (['pending', 'confirmed', 'progress', 'ready'].includes(order.status)) {
-    actions.push(`<button type="button" class="link-btn" data-order-action="completed" data-order-id="${id}">${t('completeOrder')}</button>`);
-  }
-  if (order.status === 'completed') {
-    actions.push(`<button type="button" class="link-btn order-option-btn" data-order-action="ready" data-order-revert="completed" data-order-id="${id}">${t('orderReady')}</button>`);
-    actions.push(`<button type="button" class="link-btn order-option-btn" data-order-action="progress" data-order-revert="completed" data-order-id="${id}">${t('orderProgress')}</button>`);
+  const currentGroup = orderGroupIdForStatus(order.status);
+  for (const group of ORDER_GROUPS) {
+    const targetStatus = orderGroupTargetStatus(group.id);
+    const isCurrent = currentGroup === group.id;
+    const revert = order.status === 'completed' && group.id !== 'completed';
+    actions.push(
+      `<button type="button" class="link-btn order-status-btn${isCurrent ? ' is-current' : ''}" data-order-action="${targetStatus}" data-order-id="${id}"${revert ? ' data-order-revert="completed"' : ''}${isCurrent ? ' disabled aria-current="true"' : ''}>${t(group.labelKey)}</button>`
+    );
   }
   if (order.status !== 'cancelled') {
     actions.push(orderCancelButton(id));
@@ -5208,8 +5196,8 @@ document.getElementById('order-form')?.addEventListener('submit', async (e) => {
     e.target.quantity.value = 1;
     syncWeightEntryPanels(e.target, 'custom');
     clearOrderCustomer();
-    orderGroup = 'progress';
-    setOrderGroup('progress');
+    orderGroup = 'new';
+    setOrderGroup('new');
     await upsertCustomerActivity({
       name: body.customerName,
       phone: body.customerPhone
@@ -5304,6 +5292,8 @@ document.getElementById('orders-content')?.addEventListener('click', async (e) =
     if (action === 'cancelled' && !confirm(t('cancelOrderConfirm'))) return;
     try {
       await updateOrderStatus(actionBtn.dataset.orderId, action);
+      const tabGroup = orderGroupIdForStatus(action);
+      if (tabGroup) setOrderGroup(tabGroup);
     } catch (err) { toast(err.message); }
   }
 });

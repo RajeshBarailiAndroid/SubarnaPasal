@@ -1629,17 +1629,7 @@ app.patch('/api/orders/:id', asyncRoute(async (req, res) => {
     } catch (err) {
       return res.status(400).json({ error: err.message });
     }
-  }
-
-  if (nextStatus === 'ready' && order.status === 'completed') {
-    revertOrderCompletion(store, order);
-  }
-
-  if (nextStatus === 'progress' && order.status === 'completed') {
-    revertOrderCompletion(store, order);
-  }
-
-  if (nextStatus === 'cancelled' && order.status === 'completed') {
+  } else if (nextStatus !== 'completed' && order.status === 'completed') {
     revertOrderCompletion(store, order);
   }
 

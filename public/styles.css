@@ -87,6 +87,7 @@
 }
 
 [data-theme="dark"] .badge.reserved,
+[data-theme="dark"] .badge.order-new,
 [data-theme="dark"] .badge.order-pending {
   background: rgba(230, 126, 34, 0.2);
 }
@@ -1430,6 +1431,7 @@ th {
 
 .badge.sold { background: #fef2f2; color: var(--danger); }
 .badge.reserved { background: #fff7ed; color: var(--warning); }
+.badge.order-new { background: #fff7ed; color: #e65100; }
 .badge.order-pending { background: #fff7ed; color: var(--warning); }
 .badge.order-confirmed { background: #eff6ff; color: var(--info); }
 .badge.order-progress { background: #f5f3ff; color: #7c3aed; }
@@ -2819,8 +2821,8 @@ th {
   flex-shrink: 0;
 }
 
+.order-group-dot-new { background: #e65100; }
 .order-group-dot-progress { background: #7b1fa2; }
-.order-group-dot-ready { background: var(--success); }
 .order-group-dot-completed { background: #1565c0; }
 .order-group-dot-other { background: #e65100; }
 
@@ -4369,7 +4371,7 @@ th {
 }
 
 .options-cell {
-  min-width: 140px;
+  min-width: 220px;
 }
 
 .order-cart-btn {
@@ -4399,6 +4401,13 @@ th {
 .order-cart-icon {
   width: 16px;
   height: 16px;
+}
+
+.order-status-btn.is-current {
+  font-weight: 600;
+  color: var(--text);
+  opacity: 0.65;
+  cursor: default;
 }
 
 .order-option-btn {
