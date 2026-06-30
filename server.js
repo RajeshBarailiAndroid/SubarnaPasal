@@ -70,13 +70,15 @@ function getStoreLocations(store) {
   return ['Desk A', 'Desk B', 'Side Desk'];
 }
 
-const DEFAULT_ITEM_CATEGORIES = ['Ring', 'Necklace', 'Bangle', 'Earring', 'Coin', 'Bar', 'Other'];
+const DEFAULT_ITEM_CATEGORIES = ['Gold', 'Silver', 'Other'];
 
 function normalizeItemCategories(list) {
   const items = [...new Set(
     (Array.isArray(list) ? list : []).map((c) => String(c).trim()).filter(Boolean)
   )];
-  if (!items.some((c) => c.toLowerCase() === 'other')) items.push('Other');
+  ['Gold', 'Silver', 'Other'].forEach((name) => {
+    if (!items.some((c) => c.toLowerCase() === name.toLowerCase())) items.push(name);
+  });
   return items;
 }
 
@@ -241,9 +243,39 @@ function gramsToTola(grams) {
   return Number((grams / TOLA_GRAMS).toFixed(3));
 }
 
-function itemValue(item, goldRatePerTola) {
-  const goldValue = gramsToTola(item.weightGrams) * goldRatePerTola * (item.karat / 24);
-  return Math.round(goldValue + (item.makingCharge || 0));
+function itemMetalType(item) {
+  const slug = String(item?.category || '').trim().toLowerCase();
+  if (slug === 'silver') return 'silver';
+  if (slug === 'other') return 'other';
+  return 'gold';
+}
+
+function itemValue(item, rates) {
+  const goldRate = typeof rates === 'object' && rates != null
+    ? Number(rates.goldRatePerTola) || 0
+    : Number(rates) || 0;
+  const silverRate = typeof rates === 'object' && rates != null
+    ? Number(rates.silverRatePerTola) || 0
+    : 0;
+  const weightTola = gramsToTola(item.weightGrams);
+  const making = Number(item.makingCharge) || 0;
+  const metal = itemMetalType(item);
+
+  if (metal === 'silver') {
+    return Math.round(weightTola * silverRate + making);
+  }
+  if (metal === 'other') {
+    const rate = Number(item.customRatePerTola) || 0;
+    if (!rate) {
+      const sale = Number(item.salePrice);
+      if (sale > 0) return Math.round(sale);
+      return Math.round(making);
+    }
+    return Math.round(weightTola * rate + making);
+  }
+
+  const goldValue = weightTola * goldRate * ((Number(item.karat) || 24) / 24);
+  return Math.round(goldValue + making);
 }
 
 function isItemSoldOut(item) {
@@ -314,16 +346,127 @@ function nextOrderNumber(store) {
   return `SP-${next}`;
 }
 
-function buildOrderLine(item, quantity, goldRatePerTola) {
+function metalRateForItem(item, metals) {
+  const metal = itemMetalType(item);
+  if (metal === 'silver') return Number(metals.silverRatePerTola) || 0;
+  if (metal === 'other') return Number(item.customRatePerTola) || 0;
+  return Number(metals.goldRatePerTola) || 0;
+}
+
+function metalDefaultName(category) {
+  const metal = itemMetalType({ category });
+  if (metal === 'silver') return 'Silver';
+  if (metal === 'other') return 'Other';
+  return 'Gold';
+}
+
+function validateInventoryMetalFields(body) {
+  const category = String(body.category || 'gold').trim().toLowerCase();
+  const metal = itemMetalType({ category });
+  if (metal === 'other' && !(Number(body.customRatePerTola) > 0)) {
+    return 'Enter a rate per tola for Other metal items.';
+  }
+  return null;
+}
+
+function calcItemLinePriceServer(item, { weightUnit = 'grams', tolaParts = null, metals }) {
+  const metal = itemMetalType(item);
+  const making = Number(item.makingCharge) || 0;
+  const weightGrams = Number(item.weightGrams) || 0;
+  const rate = metalRateForItem(item, metals);
+
+  if (metal === 'other' && !rate) {
+    const sale = Number(item.salePrice);
+    if (sale > 0) return Math.round(sale);
+    return Math.round(making);
+  }
+
+  const karatFactor = metal === 'gold' ? (Number(item.karat) || 24) / 24 : 1;
+
+  if (weightUnit === 'tola' && tolaParts) {
+    const t = Number(tolaParts.tola) || 0;
+    const a = Number(tolaParts.aana) || 0;
+    const l = Number(tolaParts.laal) || 0;
+    if (!t && !a && !l) return 0;
+    if (!rate) return 0;
+    const rateAana = rate / AANA_PER_TOLA;
+    const rateLaal = rate / LAAL_PER_TOLA;
+    const metalVal = (t * rate + a * rateAana + l * rateLaal) * karatFactor;
+    return Math.round(metalVal + making);
+  }
+
+  if (!weightGrams) return 0;
+  return itemValue(item, metals);
+}
+
+function buildOrderLine(item, quantity, metals) {
   const qty = Math.max(1, Number(quantity));
-  const unitPrice = itemValue(item, goldRatePerTola);
+  const unitPrice = itemValue(item, metals);
   return {
     itemId: item.id,
     itemName: item.name,
     sku: item.sku,
+    category: item.category || 'gold',
     quantity: qty,
     unitPrice,
     lineTotal: unitPrice * qty
+  };
+}
+
+function buildCustomOrderLine(body, quantity, metals) {
+  const custom = body.customItem || {};
+  const category = String(custom.category || body.customCategory || body.category || 'gold').trim().toLowerCase();
+  const metal = itemMetalType({ category });
+  const itemName = String(custom.name || body.customItemName || '').trim();
+  if (metal === 'other' && !itemName) {
+    throw new Error('Enter a name for Other metal items.');
+  }
+  const weightGrams = Number(custom.weightGrams ?? body.customWeightGrams) || 0;
+  const karat = Number(custom.karat ?? body.customKarat) || 24;
+  const makingCharge = Number(custom.makingCharge ?? body.customMakingCharge) || 0;
+  const customRatePerTola = Number(custom.customRatePerTola ?? body.customRatePerTola) || 0;
+  const weightUnit = String(custom.weightUnit || body.customWeightUnit || 'grams');
+  const tolaParts = weightUnit === 'tola'
+    ? {
+      tola: Number(custom.weightTola ?? body.customWeightTola) || 0,
+      aana: Number(custom.weightAana ?? body.customWeightAana) || 0,
+      laal: Number(custom.weightLaal ?? body.customWeightLaal) || 0
+    }
+    : null;
+  const hasTolaWeight = weightUnit === 'tola' && tolaParts
+    && (tolaParts.tola || tolaParts.aana || tolaParts.laal);
+  if (weightUnit === 'tola') {
+    if (!hasTolaWeight) throw new Error('Weight is required.');
+  } else if (weightGrams <= 0) {
+    throw new Error('Weight is required.');
+  }
+  if (metal === 'other' && !customRatePerTola) {
+    throw new Error('Enter a rate per tola for Other metal items.');
+  }
+
+  const qty = Math.max(1, Number(quantity));
+  const draft = {
+    category,
+    karat,
+    weightGrams,
+    makingCharge,
+    customRatePerTola,
+    salePrice: 0
+  };
+  const unitPrice = calcItemLinePriceServer(draft, { weightUnit, tolaParts, metals });
+
+  return {
+    itemId: `custom-${Date.now()}`,
+    itemName: itemName || metalDefaultName(category),
+    sku: 'CUSTOM',
+    category,
+    quantity: qty,
+    unitPrice,
+    lineTotal: unitPrice * qty,
+    custom: true,
+    weightGrams,
+    karat,
+    customRatePerTola: metal === 'other' ? customRatePerTola : 0
   };
 }
 
@@ -370,7 +513,7 @@ function txAmount(store, tx) {
   }
   const item = store.items.find((i) => i.id === tx.itemId);
   if (!item) return 0;
-  return itemValue(item, store.settings.goldRatePerTola) * Number(tx.quantity || 0);
+  return itemValue(item, store.settings) * Number(tx.quantity || 0);
 }
 
 function inDateRange(iso, start, end) {
@@ -383,10 +526,9 @@ function inDateRange(iso, start, end) {
 
 async function buildReports(store, start, end) {
   const metals = await resolveMetalRates(store);
-  const rate = goldRateForValuation(metals);
   const inStock = store.items.filter((i) => i.status === 'in_stock' && i.quantity > 0);
   const totalWeight = inStock.reduce((sum, i) => sum + i.weightGrams * i.quantity, 0);
-  const totalValue = inStock.reduce((sum, i) => sum + itemValue(i, rate) * i.quantity, 0);
+  const totalValue = inStock.reduce((sum, i) => sum + itemValue(i, metals) * i.quantity, 0);
   const lowStock = store.items.filter((i) => i.status === 'in_stock' && i.quantity <= 1);
 
   const transactions = store.transactions
@@ -435,7 +577,7 @@ async function buildReports(store, start, end) {
   return {
     period: { start: start || null, end: end || null },
     goldRatePerTola: metals.goldRatePerTola,
-    goldRatePerTolaNpr: rate,
+    goldRatePerTolaNpr: goldRateForValuation(metals),
     metalRatesLive: metals.live,
     metalCurrency: metals.currency,
     currency: store.settings.currency || 'USD',
@@ -753,6 +895,8 @@ app.post('/api/items', asyncRoute(async (req, res) => {
   if (!body.name || !body.sku) {
     return res.status(400).json({ error: 'Name and SKU are required.' });
   }
+  const metalError = validateInventoryMetalFields(body);
+  if (metalError) return res.status(400).json({ error: metalError });
   if (store.items.some((i) => i.sku === body.sku)) {
     return res.status(400).json({ error: 'SKU already exists.' });
   }
@@ -761,12 +905,13 @@ app.post('/api/items', asyncRoute(async (req, res) => {
     id: newId('sp'),
     sku: String(body.sku).trim(),
     name: String(body.name).trim(),
-    category: body.category || 'other',
+    category: body.category || 'gold',
     karat: Number(body.karat) || 24,
     weightGrams: Number(body.weightGrams) || 0,
     makingCharge: Number(body.makingCharge) || 0,
     purchaseCost: Number(body.purchaseCost) || 0,
     salePrice: Number(body.salePrice) || 0,
+    customRatePerTola: Number(body.customRatePerTola) || 0,
     quantity: Math.max(0, Number(body.quantity) || 0),
     status: body.status || 'in_stock',
     location: String(body.location || '').trim(),
@@ -794,6 +939,13 @@ app.put('/api/items/:id', asyncRoute(async (req, res) => {
   }
   const name = body.name != null ? String(body.name).trim() : existing.name;
   if (!name) return res.status(400).json({ error: 'Name is required.' });
+  const metalError = validateInventoryMetalFields({
+    category: body.category != null ? body.category : existing.category,
+    customRatePerTola: body.customRatePerTola != null
+      ? body.customRatePerTola
+      : existing.customRatePerTola
+  });
+  if (metalError) return res.status(400).json({ error: metalError });
   const updated = normalizeItemRecord({
     id: existing.id,
     sku: body.sku != null ? String(body.sku).trim() : existing.sku,
@@ -804,6 +956,9 @@ app.put('/api/items/:id', asyncRoute(async (req, res) => {
     makingCharge: body.makingCharge != null ? Number(body.makingCharge) || 0 : existing.makingCharge,
     purchaseCost: body.purchaseCost != null ? Number(body.purchaseCost) || 0 : existing.purchaseCost,
     salePrice: body.salePrice != null ? Number(body.salePrice) || 0 : existing.salePrice || 0,
+    customRatePerTola: body.customRatePerTola != null
+      ? Number(body.customRatePerTola) || 0
+      : existing.customRatePerTola || 0,
     quantity: body.quantity != null ? Number(body.quantity) || 0 : existing.quantity,
     status: body.status != null ? body.status : existing.status,
     location: body.location != null ? String(body.location).trim() : existing.location || '',
@@ -941,7 +1096,8 @@ app.post('/api/transactions', asyncRoute(async (req, res) => {
   }
 
   item.updatedAt = new Date().toISOString();
-  const amount = type === 'sale' ? itemValue(item, store.settings.goldRatePerTola) * qty : 0;
+  const metals = await resolveMetalRates(store);
+  const amount = type === 'sale' ? itemValue(item, metals) * qty : 0;
   const tx = {
     id: newId('tx'),
     type,
@@ -989,44 +1145,15 @@ app.post('/api/orders', asyncRoute(async (req, res) => {
   if (!customerName) return res.status(400).json({ error: 'Customer name is required.' });
 
   const metals = await resolveMetalRates(store);
-  const goldRate = goldRateForValuation(metals);
   const now = new Date().toISOString();
   let line;
 
   if (body.orderItemMode === 'custom' || body.customItem) {
-    const custom = body.customItem || {};
-    const itemName = String(custom.name || body.customItemName || '').trim();
-    const weightGrams = Number(custom.weightGrams ?? body.customWeightGrams) || 0;
-    const karat = Number(custom.karat ?? body.customKarat) || 24;
-    const makingCharge = Number(custom.makingCharge ?? body.customMakingCharge) || 0;
-    const weightUnit = String(custom.weightUnit || body.customWeightUnit || 'grams');
-    const tolaParts = weightUnit === 'tola'
-      ? {
-        tola: Number(custom.weightTola ?? body.customWeightTola) || 0,
-        aana: Number(custom.weightAana ?? body.customWeightAana) || 0,
-        laal: Number(custom.weightLaal ?? body.customWeightLaal) || 0
-      }
-      : null;
-    if (!itemName) return res.status(400).json({ error: 'Item name is required.' });
-    const hasTolaWeight = weightUnit === 'tola' && tolaParts
-      && (tolaParts.tola || tolaParts.aana || tolaParts.laal);
-    if (weightUnit === 'tola') {
-      if (!hasTolaWeight) return res.status(400).json({ error: 'Weight is required.' });
-    } else if (weightGrams <= 0) {
-      return res.status(400).json({ error: 'Weight is required.' });
+    try {
+      line = buildCustomOrderLine(body, quantity, metals);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
     }
-    const unitPrice = calcGoldPriceNpr(weightGrams, makingCharge, goldRate, weightUnit, tolaParts);
-    line = {
-      itemId: `custom-${Date.now()}`,
-      itemName,
-      sku: 'CUSTOM',
-      quantity,
-      unitPrice,
-      lineTotal: unitPrice * quantity,
-      custom: true,
-      weightGrams,
-      karat
-    };
   } else {
     const itemId = String(body.itemId || '').trim();
     if (!itemId) return res.status(400).json({ error: 'Item is required.' });
@@ -1035,7 +1162,7 @@ app.post('/api/orders', asyncRoute(async (req, res) => {
     if (item.quantity < quantity) {
       return res.status(400).json({ error: 'Not enough stock for this order.' });
     }
-    line = buildOrderLine(item, quantity, goldRate);
+    line = buildOrderLine(item, quantity, metals);
   }
 
   const order = {

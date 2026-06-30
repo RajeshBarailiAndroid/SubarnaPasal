@@ -1509,7 +1509,7 @@ function inventoryTableHead() {
     <th><input type="checkbox" aria-label="Select all" /></th>
     <th class="sortable">${t('name')}${sortIcon()}</th>
     <th>${t('sku')}</th>
-    <th>${t('category')}</th>
+    <th>${t('itemMetal')}</th>
     <th>${t('location')}</th>
     <th>${t('weightGramsCol')}</th>
     <th>${t('purity')}</th>
@@ -1730,7 +1730,10 @@ function orderDueDate(order) {
 }
 
 function orderItemsSummary(order) {
-  return (order.lines || []).map((l) => `${l.itemName} × ${l.quantity}`).join(', ') || '—';
+  return (order.lines || []).map((l) => {
+    const metal = categoryLabel(l.category || 'gold');
+    return `${metal}: ${l.itemName} × ${l.quantity}`;
+  }).join(', ') || '—';
 }
 
 function gramsToTola(g) {
@@ -1920,6 +1923,15 @@ function getTolaPartsFromForm(form, prefix = '') {
     aana: Number(form.elements[names.aanaName]?.value) || 0,
     laal: Number(form.elements[names.laalName]?.value) || 0
   };
+}
+
+function hasWeightFromForm(form, prefix = '') {
+  if (!form) return false;
+  if (getWeightUnit(form, prefix) === 'tola') {
+    const parts = getTolaPartsFromForm(form, prefix);
+    return Boolean(parts.tola || parts.aana || parts.laal);
+  }
+  return getWeightGramsFromForm(form, prefix) > 0;
 }
 
 function calcGoldMetalNpr({ grams = 0, unit = 'grams', tolaParts = null, ratePerTolaNpr = goldRateCache } = {}) {
@@ -2673,8 +2685,7 @@ function setOrderItemMode(form, mode) {
     btn.setAttribute('aria-selected', active ? 'true' : 'false');
   });
   if (itemSelect) itemSelect.required = !isCustom;
-  const customName = form.elements.customItemName;
-  if (customName) customName.required = isCustom;
+  syncItemMetalFields(form, METAL_FIELD_PRESETS.order);
   const customWeightEntry = getWeightEntryEl(form, 'custom');
   if (customWeightEntry) {
     customWeightEntry.querySelectorAll('input').forEach((input) => {
@@ -2685,9 +2696,89 @@ function setOrderItemMode(form, mode) {
   updateOrderItemWeightPreview();
 }
 
-function itemMarketValue(item, rate) {
-  const gold = (Number(item.weightGrams) / TOLA_GRAMS) * rate * (item.karat / 24);
-  return Math.round(gold + (Number(item.makingCharge) || 0));
+function itemMetalType(itemOrCategory) {
+  const slug = typeof itemOrCategory === 'string'
+    ? itemOrCategory
+    : String(itemOrCategory?.category || '').trim().toLowerCase();
+  if (slug === 'silver') return 'silver';
+  if (slug === 'other') return 'other';
+  return 'gold';
+}
+
+const METAL_TYPES = ['Gold', 'Silver', 'Other'];
+
+const METAL_FIELD_PRESETS = {
+  inventory: { category: 'category', karat: 'karat', customRate: 'customRatePerTola', name: 'name', requireNameForOther: false },
+  customItem: { category: 'category', karat: 'karat', customRate: 'customRatePerTola', name: 'name', requireNameForOther: true },
+  order: { category: 'customCategory', karat: 'customKarat', customRate: 'customRatePerTola', name: 'customItemName', requireNameForOther: true }
+};
+
+function resolveCustomItemName(category, providedName) {
+  const trimmed = String(providedName || '').trim();
+  if (trimmed) return trimmed;
+  if (itemMetalType(category) === 'other') return '';
+  return categoryLabel(category || 'gold');
+}
+
+function validateCustomItemName(category, name) {
+  if (itemMetalType(category) === 'other' && !String(name || '').trim()) {
+    toast(t('itemNameOtherRequired'));
+    return false;
+  }
+  return true;
+}
+
+function validateOtherMetalRate(category, rate) {
+  if (itemMetalType(category) === 'other' && !(Number(rate) > 0)) {
+    toast(t('itemManualRateRequired'));
+    return false;
+  }
+  return true;
+}
+
+function lineMetalLabel(line) {
+  return categoryLabel(line.category || line.item?.category || 'gold');
+}
+
+function metalValueFromWeight(weightGrams, ratePerTola, weightUnit = 'grams', tolaParts = null, karatFactor = 1) {
+  if (!ratePerTola || !weightGrams) return 0;
+  let metalValue;
+  if (weightUnit === 'tola' && tolaParts) {
+    metalValue = calcGoldMetalNpr({ grams: weightGrams, unit: 'tola', tolaParts, ratePerTolaNpr: ratePerTola });
+  } else {
+    metalValue = (weightGrams / TOLA_GRAMS) * ratePerTola;
+  }
+  return metalValue * karatFactor;
+}
+
+function calcItemLinePrice(itemDraft, { weightUnit = 'grams', tolaParts = null, rates = null } = {}) {
+  const metal = itemMetalType(itemDraft);
+  const weightGrams = Number(itemDraft.weightGrams) || 0;
+  const making = Number(itemDraft.makingCharge) || 0;
+  if (!weightGrams) return null;
+
+  let rate = 0;
+  let karatFactor = 1;
+  if (metal === 'silver') {
+    rate = rates?.silverRatePerTola ?? silverRateCache ?? 0;
+  } else if (metal === 'other') {
+    rate = Number(itemDraft.customRatePerTola) || 0;
+    if (!rate) {
+      const sale = Number(itemDraft.salePrice);
+      if (sale > 0) return Math.round(sale);
+      return Math.round(making);
+    }
+  } else {
+    rate = rates?.goldRatePerTola ?? getGoldRatePerTolaNpr();
+    karatFactor = (Number(itemDraft.karat) || 24) / 24;
+  }
+
+  const metalValue = metalValueFromWeight(weightGrams, rate, weightUnit, tolaParts, karatFactor);
+  return Math.round(metalValue + making);
+}
+
+function itemMarketValue(item, rates = null) {
+  return calcItemLinePrice(item, { weightUnit: 'grams', rates });
 }
 
 function calcGoldPriceNpr(weightGrams, makingChargeNpr = 0, unit = 'grams', tolaParts = null, ratePerTolaNpr = getGoldRatePerTolaNpr()) {
@@ -2700,13 +2791,64 @@ function itemPriceFromForm(form, prefix = '') {
   const weightGrams = getWeightGramsFromForm(form, prefix);
   const weightUnit = getWeightUnit(form, prefix);
   const tolaParts = weightUnit === 'tola' ? getTolaPartsFromForm(form, prefix) : null;
-  const makingCharge = parseMoneyField(form.makingCharge?.value) || 0;
   if (!Number.isFinite(weightGrams) || weightGrams <= 0) return null;
-  return calcGoldPriceNpr(weightGrams, makingCharge, weightUnit, tolaParts);
+
+  return calcItemLinePrice({
+    category: form.elements.category?.value || 'gold',
+    karat: Number(form.elements.karat?.value) || 24,
+    weightGrams,
+    makingCharge: parseMoneyField(form.makingCharge?.value) || 0,
+    customRatePerTola: parseMoneyField(form.customRatePerTola?.value) || 0,
+    salePrice: parseMoneyField(form.salePrice?.value)
+  }, { weightUnit, tolaParts });
 }
 
 function getItemCalculatedPriceNpr(item) {
-  return calcGoldPriceNpr(item.weightGrams, item.makingCharge || 0, 'grams');
+  return itemMarketValue(item);
+}
+
+function syncItemMetalFields(form, fields = METAL_FIELD_PRESETS.inventory) {
+  if (!form) return;
+  const categoryField = fields.category || 'category';
+  const karatField = fields.karat || 'karat';
+  const customRateField = fields.customRate || 'customRatePerTola';
+  const metal = itemMetalType(form.elements[categoryField]?.value || 'gold');
+  const karatEl = form.elements[karatField];
+  const karatLabel = karatEl?.closest('label') || form.querySelector(`label:has([name="${karatField}"])`);
+  const customRateLabel = form.querySelector('.item-custom-rate-field');
+  const rateHint = form.querySelector('.item-metal-rate-hint');
+
+  if (karatLabel) karatLabel.hidden = metal !== 'gold';
+  if (customRateLabel) customRateLabel.hidden = metal !== 'other';
+
+  if (fields.name) {
+    const nameEl = form.elements[fields.name];
+    if (fields.requireNameForOther && nameEl) nameEl.required = metal === 'other';
+    const placeholderKey = metal === 'other'
+      ? 'itemNameOtherPh'
+      : (fields.requireNameForOther ? 'itemNameOptionalPh' : '');
+    if (nameEl?.dataset.i18nPlaceholder) {
+      nameEl.placeholder = placeholderKey ? t(placeholderKey) : '';
+    }
+  }
+
+  if (rateHint) {
+    if (metal === 'gold') {
+      const rate = getGoldRatePerTolaNpr();
+      rateHint.textContent = rate > 0
+        ? `${t('itemUsesGoldRate')}: ${formatMoney(rate)}/tola`
+        : t('itemUsesGoldRate');
+      rateHint.hidden = false;
+    } else if (metal === 'silver') {
+      const rate = silverRateCache || 0;
+      rateHint.textContent = rate > 0
+        ? `${t('itemUsesSilverRate')}: ${formatMoney(rate)}/tola`
+        : t('itemUsesSilverRate');
+      rateHint.hidden = false;
+    } else {
+      rateHint.hidden = true;
+    }
+  }
 }
 
 function getItemDisplayPrice(item) {
@@ -2999,7 +3141,7 @@ function generateSku(prefix = 'SKU') {
   return `${prefix}-${stamp}${rand}`;
 }
 
-function renderCategorySelect(select, { includeAll = false, defaultValue = 'other' } = {}) {
+function renderCategorySelect(select, { includeAll = false, defaultValue = 'gold' } = {}) {
   if (!select) return;
   const previous = select.value;
   select.innerHTML = '';
@@ -3035,6 +3177,10 @@ function renderAllCategorySelects() {
   renderCategorySelect(document.getElementById('pos-filter-category'), { includeAll: true });
   renderCategorySelect(document.querySelector('#item-form select[name="category"]'));
   renderCategorySelect(document.querySelector('#custom-item-form select[name="category"]'));
+  renderCategorySelect(document.querySelector('#order-form select[name="customCategory"]'));
+  syncItemMetalFields(document.getElementById('item-form'), METAL_FIELD_PRESETS.inventory);
+  syncItemMetalFields(document.getElementById('custom-item-form'), METAL_FIELD_PRESETS.customItem);
+  syncItemMetalFields(document.getElementById('order-form'), METAL_FIELD_PRESETS.order);
 }
 
 function renderItemCategoriesManager() {
@@ -3044,9 +3190,10 @@ function renderItemCategoriesManager() {
     list.innerHTML = `<li class="location-empty">${t('noCategories')}</li>`;
     return;
   }
+  const protectedSlugs = new Set(['gold', 'silver', 'other']);
   list.innerHTML = itemCategoriesCache.map((cat, idx) => {
-    const isOther = categorySlug(cat) === 'other';
-    const removeBtn = isOther
+    const isProtected = protectedSlugs.has(categorySlug(cat));
+    const removeBtn = isProtected
       ? ''
       : `<button type="button" class="location-remove" data-remove-category="${idx}" title="${t('delete')}" aria-label="${t('delete')}">×</button>`;
     return `
@@ -3088,7 +3235,8 @@ async function addStoreCategory(name) {
 async function removeStoreCategory(index) {
   const idx = Number(index);
   if (!Number.isInteger(idx) || idx < 0 || idx >= itemCategoriesCache.length) return;
-  if (categorySlug(itemCategoriesCache[idx]) === 'other') return;
+  const protectedSlugs = new Set(['gold', 'silver', 'other']);
+  if (protectedSlugs.has(categorySlug(itemCategoriesCache[idx]))) return;
   itemCategoriesCache = itemCategoriesCache.filter((_, i) => i !== idx);
   renderItemCategoriesManager();
   toast(t('categoryRemoved'));
@@ -3236,9 +3384,7 @@ async function loadSettings() {
   renderLocationDatalist();
   renderLocationsManager();
 
-  itemCategoriesCache = settings.itemCategories?.length
-    ? settings.itemCategories
-    : [...DEFAULT_ITEM_CATEGORIES];
+  itemCategoriesCache = [...METAL_TYPES];
   setItemCategoryNames(itemCategoriesCache);
   renderAllCategorySelects();
   renderItemCategoriesManager();
@@ -3291,7 +3437,9 @@ function showView(name) {
 }
 
 function cartLineName(line) {
-  return line.name || line.itemName || line.sku || t('item');
+  const name = line.name || line.itemName || '';
+  if (name) return name;
+  return lineMetalLabel(line);
 }
 
 function getSaleCustomerName() {
@@ -3424,8 +3572,8 @@ function renderCart() {
   } else {
     linesEl.innerHTML = posCart.map((line, idx) => {
       const meta = line.custom
-        ? `${line.sku} · ${line.karat || '—'}K · ${line.weightGrams || '—'}g × ${line.qty}`
-        : `${line.sku || '—'} × ${line.qty}`;
+        ? `${lineMetalLabel(line)} · ${line.sku} · ${line.karat || '—'}K · ${line.weightGrams || '—'}g × ${line.qty}`
+        : `${lineMetalLabel(line)} · ${line.sku || '—'} × ${line.qty}`;
       return `
       <div class="cart-line">
         <div class="cart-line-info">
@@ -3503,7 +3651,7 @@ function renderPosCatalog() {
           <tr>
             <th>${t('name')}</th>
             <th>${t('sku')}</th>
-            <th>${t('category')}</th>
+            <th>${t('itemMetal')}</th>
             <th>${t('stock')}</th>
             <th>${t('status')}</th>
             <th>${t('priceInfo')}</th>
@@ -3660,24 +3808,16 @@ function addCustomItemToCart(data) {
   try { requireSignedInSync(); } catch (err) { toast(err.message); return; }
   const itemName = String(data.name || '').trim();
   const qty = Math.max(1, Number(data.quantity) || 1);
-  const calculated = data.weightUnit === 'tola' && data.tolaParts
-    ? calcGoldPriceNpr(
-      Number(data.weightGrams),
-      parseMoneyField(data.makingCharge) || 0,
-      'tola',
-      data.tolaParts
-    )
-    : data.weightUnit
-      ? calcGoldPriceNpr(
-        Number(data.weightGrams),
-        parseMoneyField(data.makingCharge) || 0,
-        data.weightUnit
-      )
-      : itemMarketValue({
-        weightGrams: Number(data.weightGrams),
-        karat: Number(data.karat),
-        makingCharge: parseMoneyField(data.makingCharge) || 0
-      }, goldRateCache);
+  const weightUnit = data.weightUnit || 'grams';
+  const tolaParts = data.tolaParts || null;
+  const calculated = calcItemLinePrice({
+    category: data.category || 'gold',
+    karat: Number(data.karat) || 24,
+    weightGrams: Number(data.weightGrams),
+    makingCharge: parseMoneyField(data.makingCharge) || 0,
+    customRatePerTola: parseMoneyField(data.customRatePerTola) || 0,
+    salePrice: data.salePrice != null ? parseMoneyField(data.salePrice) : 0
+  }, { weightUnit, tolaParts });
   const manualPrice = data.salePrice !== '' && data.salePrice != null
     ? parseMoneyField(data.salePrice)
     : null;
@@ -3709,8 +3849,9 @@ function addCustomItemToCart(data) {
     custom: true,
     sku,
     name: itemName,
-    category: data.category || 'other',
+    category: data.category || 'gold',
     karat,
+    customRatePerTola: parseMoneyField(data.customRatePerTola) || 0,
     weightGrams,
     location: String(data.location || '').trim(),
     notes: String(data.notes || '').trim(),
@@ -3737,6 +3878,7 @@ function addToCart(item) {
       itemId: item.id,
       sku: item.sku,
       name: item.name,
+      category: item.category || 'gold',
       qty: 1,
       price: getItemDisplayPrice(item)
     });
@@ -4347,12 +4489,11 @@ function updateOrderTotalPreview() {
   if (!form) return;
   const totalEl = document.getElementById('order-total-preview');
   const qty = Number(form.quantity.value) || 1;
+  const breakdownEl = document.getElementById('order-price-breakdown');
   if (isOrderCustomItemMode(form)) {
     const weightGrams = getWeightGramsFromForm(form, 'custom');
     const weightUnit = getWeightUnit(form, 'custom');
     const tolaParts = weightUnit === 'tola' ? getTolaPartsFromForm(form, 'custom') : null;
-    const makingCharge = parseMoneyField(form.customMakingCharge?.value) || 0;
-    const breakdownEl = document.getElementById('order-price-breakdown');
     const hasWeight = weightUnit === 'tola'
       ? Boolean(tolaParts && (tolaParts.tola || tolaParts.aana || tolaParts.laal))
       : weightGrams > 0;
@@ -4364,8 +4505,14 @@ function updateOrderTotalPreview() {
       }
       return;
     }
-    const rateNpr = getGoldRatePerTolaNpr();
-    if (!rateNpr) {
+    const unitTotal = calcItemLinePrice({
+      category: form.customCategory?.value || 'gold',
+      karat: Number(form.customKarat?.value) || 24,
+      weightGrams,
+      makingCharge: parseMoneyField(form.customMakingCharge?.value) || 0,
+      customRatePerTola: parseMoneyField(form.customRatePerTola?.value) || 0
+    }, { weightUnit, tolaParts });
+    if (unitTotal == null) {
       if (totalEl) totalEl.value = '—';
       if (breakdownEl) {
         breakdownEl.hidden = true;
@@ -4373,23 +4520,27 @@ function updateOrderTotalPreview() {
       }
       return;
     }
-    const unitTotal = calcGoldPriceNpr(weightGrams, makingCharge, weightUnit, tolaParts, rateNpr);
     if (totalEl) totalEl.value = formatMoney(unitTotal * qty);
     if (breakdownEl) {
-      const html = renderOrderPriceBreakdown({
+      const metal = itemMetalType(form.customCategory?.value || 'gold');
+      const rateNpr = metal === 'silver'
+        ? silverRateCache
+        : metal === 'other'
+          ? parseMoneyField(form.customRatePerTola?.value) || 0
+          : getGoldRatePerTolaNpr();
+      const html = rateNpr > 0 ? renderOrderPriceBreakdown({
         weightUnit,
         weightGrams,
         tolaParts,
-        makingChargeNpr: makingCharge,
+        makingChargeNpr: parseMoneyField(form.customMakingCharge?.value) || 0,
         qty,
         ratePerTolaNpr: rateNpr
-      });
+      }) : '';
       breakdownEl.innerHTML = html;
       breakdownEl.hidden = !html;
     }
     return;
   }
-  const breakdownEl = document.getElementById('order-price-breakdown');
   if (breakdownEl) {
     breakdownEl.hidden = true;
     breakdownEl.innerHTML = '';
@@ -4415,12 +4566,13 @@ function itemPayloadFromForm(form, fd) {
   return {
     sku: String(fd.get('sku') || '').trim() || generateSku(),
     name: String(fd.get('name') || '').trim(),
-    category: fd.get('category') || 'other',
+    category: fd.get('category') || 'gold',
     karat: Number(fd.get('karat')) || 24,
     weightGrams: getWeightGramsFromForm(form, ''),
     makingCharge: parseMoneyField(fd.get('makingCharge') || 0),
     purchaseCost: parseMoneyField(fd.get('purchaseCost') || 0),
     salePrice: fd.get('salePrice') ? parseMoneyField(fd.get('salePrice')) : 0,
+    customRatePerTola: parseMoneyField(fd.get('customRatePerTola') || 0),
     quantity: status === 'sold_out' ? 0 : quantity,
     status,
     location: String(fd.get('location') || '').trim(),
@@ -4438,23 +4590,24 @@ function openItemModal(item) {
   document.getElementById('modal-title').textContent = item ? t('editItemTitle') : t('addItemTitle');
   const form = document.getElementById('item-form');
   form.reset();
-  renderCategorySelect(form.category, { defaultValue: 'other' });
+  renderCategorySelect(form.category, { defaultValue: 'gold' });
+  syncItemMetalFields(form, METAL_FIELD_PRESETS.inventory);
   if (item) {
     Object.entries(item).forEach(([k, v]) => {
       if (k === 'weightGrams') return;
       const field = form.elements[k];
       if (!field) return;
       if (field.type === 'checkbox') field.checked = Boolean(v);
-      else if (['makingCharge', 'purchaseCost', 'salePrice'].includes(k)) field.value = formatMoneyField(v);
+      else if (['makingCharge', 'purchaseCost', 'salePrice', 'customRatePerTola'].includes(k)) field.value = formatMoneyField(v);
       else field.value = v;
     });
     ensureCategoryOption(form.category, item.category);
-    form.category.value = item.category || 'other';
+    form.category.value = item.category || 'gold';
     form.sku.value = item.sku || generateSku();
     setWeightFieldsFromGrams(form, item.weightGrams, '');
     syncWeightEntryPanels(form, '');
   } else {
-    form.category.value = 'other';
+    form.category.value = 'gold';
     form.sku.value = generateSku();
     form.karat.value = '24';
     form.makingCharge.value = 0;
@@ -4520,7 +4673,7 @@ function billStampBlock(options) {
 
 function buildBillHtml(sale, options = getBillOptions()) {
   const lineRows = sale.lines.map((line, i) => {
-    const meta = [line.sku, line.karat ? `${line.karat}K` : '', line.weightGrams ? `${line.weightGrams}g` : '']
+    const meta = [lineMetalLabel(line), line.sku, line.karat ? `${line.karat}K` : '', line.weightGrams ? `${line.weightGrams}g` : '']
       .filter(Boolean)
       .join(' · ');
     return `<tr>
@@ -4714,7 +4867,8 @@ function populateOrderItemSelect() {
   select.innerHTML = orderItemsCache.length
     ? orderItemsCache.map((i) => {
       const price = formatMoney(getItemDisplayPrice(i));
-      return `<option value="${i.id}">${i.sku} — ${i.name} · ${price} (${i.quantity} ${t('inStockCount')})</option>`;
+      const metal = categoryLabel(i.category || 'gold');
+      return `<option value="${i.id}">${metal} · ${i.sku} — ${i.name} · ${price} (${i.quantity} ${t('inStockCount')})</option>`;
     }).join('')
     : `<option value="">${t('noStock')}</option>`;
   select.disabled = !orderItemsCache.length;
@@ -4814,8 +4968,11 @@ async function openOrderModal({ context = 'order' } = {}) {
   form.quantity.value = 1;
   if (form.customMakingCharge) form.customMakingCharge.value = 0;
   if (form.customKarat) form.customKarat.value = '24';
+  if (form.customCategory) form.customCategory.value = 'gold';
+  renderCategorySelect(form.customCategory, { defaultValue: 'gold' });
   syncWeightEntryPanels(form, 'custom');
   setOrderItemMode(form, 'custom');
+  syncItemMetalFields(form, METAL_FIELD_PRESETS.order);
   clearOrderCustomer();
   updateOrderModalChrome();
 
@@ -4895,8 +5052,11 @@ document.getElementById('order-form')?.addEventListener('click', (e) => {
   }
 });
 document.getElementById('order-form')?.addEventListener('input', (e) => {
-  if (['itemId', 'quantity', 'customItemName', 'customKarat', 'customMakingCharge', 'customWeightUnit'].includes(e.target.name)
+  if (['itemId', 'quantity', 'customItemName', 'customKarat', 'customMakingCharge', 'customWeightUnit', 'customCategory', 'customRatePerTola'].includes(e.target.name)
     || e.target.closest('#order-custom-fields .weight-entry')) {
+    if (e.target.name === 'customCategory') {
+      syncItemMetalFields(e.target.form, METAL_FIELD_PRESETS.order);
+    }
     updateOrderTotalPreview();
   }
 });
@@ -4904,7 +5064,10 @@ document.getElementById('order-form')?.addEventListener('weight-updated', () => 
   updateOrderTotalPreview();
 });
 document.getElementById('order-form')?.addEventListener('change', (e) => {
-  if (e.target.name === 'itemId' || e.target.name === 'customWeightUnit') {
+  if (e.target.name === 'itemId' || e.target.name === 'customWeightUnit' || e.target.name === 'customCategory') {
+    if (e.target.name === 'customCategory') {
+      syncItemMetalFields(e.target.form, METAL_FIELD_PRESETS.order);
+    }
     updateOrderTotalPreview();
   }
 });
@@ -4929,7 +5092,8 @@ document.getElementById('custom-item-customer-suggestions')?.addEventListener('c
   if (customer) fillCustomItemCustomerFields(customer);
 });
 document.getElementById('custom-item-form')?.addEventListener('input', (e) => {
-  if (e.target.closest('.weight-entry') || ['karat', 'makingCharge'].includes(e.target.name)) {
+  if (e.target.closest('.weight-entry') || ['karat', 'makingCharge', 'category', 'customRatePerTola', 'salePrice'].includes(e.target.name)) {
+    if (e.target.name === 'category') syncItemMetalFields(e.target.form, METAL_FIELD_PRESETS.customItem);
     updateCustomItemPricePreview();
   }
   if (e.target.name === 'customerName') {
@@ -4944,18 +5108,27 @@ document.getElementById('custom-item-form')?.addEventListener('submit', (e) => {
   e.preventDefault();
   const fd = new FormData(e.target);
   const form = e.target;
-  const weightGrams = getWeightGramsFromForm(form, '');
-  if (weightGrams <= 0) {
+  if (!hasWeightFromForm(form, '')) {
     toast(t('weightRequired'));
     return;
   }
+  const weightGrams = getWeightGramsFromForm(form, '');
+  const weightUnit = getWeightUnit(form, '');
+  const tolaParts = weightUnit === 'tola' ? getTolaPartsFromForm(form, '') : null;
+  const category = fd.get('category') || 'gold';
+  const itemName = resolveCustomItemName(category, fd.get('name'));
+  if (!validateCustomItemName(category, itemName)) return;
+  if (!validateOtherMetalRate(category, fd.get('customRatePerTola')) return;
   addCustomItemToCart({
     customerName: fd.get('customerName'),
     customerPhone: fd.get('customerPhone'),
-    category: fd.get('category') || 'other',
-    name: fd.get('name'),
+    category,
+    name: itemName,
     karat: fd.get('karat'),
+    customRatePerTola: fd.get('customRatePerTola'),
     weightGrams,
+    weightUnit,
+    tolaParts,
     makingCharge: fd.get('makingCharge'),
     purchaseCost: fd.get('purchaseCost'),
     quantity: fd.get('quantity'),
@@ -4976,14 +5149,18 @@ document.getElementById('close-modal')?.addEventListener('click', () => document
 document.getElementById('cancel-modal')?.addEventListener('click', () => document.getElementById('item-modal').close());
 document.getElementById('item-modal')?.addEventListener('close', () => { editingId = null; });
 document.getElementById('item-form')?.addEventListener('input', (e) => {
-  if (['karat', 'makingCharge', 'salePrice', 'weightUnit'].includes(e.target.name)
+  if (['karat', 'makingCharge', 'salePrice', 'weightUnit', 'category', 'customRatePerTola'].includes(e.target.name)
     || e.target.closest('#item-form .weight-entry')) {
+    if (e.target.name === 'category') syncItemMetalFields(e.target.form, METAL_FIELD_PRESETS.inventory);
     updateItemPricePreview();
   }
 });
 document.getElementById('item-form')?.addEventListener('weight-updated', updateItemPricePreview);
 document.getElementById('item-form')?.addEventListener('change', (e) => {
-  if (e.target.name === 'weightUnit') updateItemPricePreview();
+  if (e.target.name === 'weightUnit' || e.target.name === 'category') {
+    if (e.target.name === 'category') syncItemMetalFields(e.target.form, METAL_FIELD_PRESETS.inventory);
+    updateItemPricePreview();
+  }
   if (e.target.name === 'status') {
     const form = e.target.form;
     const qtyEl = form?.elements?.quantity;
@@ -4997,8 +5174,11 @@ document.getElementById('item-form')?.addEventListener('submit', async (e) => {
   const form = e.target;
   const fd = new FormData(form);
   const body = itemPayloadFromForm(form, fd);
+  if (itemMetalType(body.category) === 'other' && !validateOtherMetalRate(body.category, body.customRatePerTola)) {
+    return;
+  }
   if (!body.name) {
-    toast(t('customItemNameRequired'));
+    toast(itemMetalType(body.category) === 'other' ? t('itemNameOtherRequired') : t('customItemNameRequired'));
     return;
   }
   if (body.weightGrams <= 0) {
@@ -5142,22 +5322,23 @@ document.getElementById('order-form')?.addEventListener('submit', async (e) => {
   body.quantity = Number(body.quantity) || 1;
 
   if (orderModalContext === 'pos' || body.orderItemMode === 'custom') {
-    const weightGrams = getWeightGramsFromForm(form, 'custom');
-    if (!String(body.customItemName || '').trim()) {
-      toast(t('customItemNameRequired'));
-      return;
-    }
-    if (weightGrams <= 0) {
+    const category = body.customCategory || 'gold';
+    const itemName = resolveCustomItemName(category, body.customItemName);
+    if (!validateCustomItemName(category, itemName)) return;
+    if (!validateOtherMetalRate(category, body.customRatePerTola)) return;
+    if (!hasWeightFromForm(form, 'custom')) {
       toast(t('weightRequired'));
       return;
     }
+    const weightGrams = getWeightGramsFromForm(form, 'custom');
     if (orderModalContext === 'pos') {
       addCustomItemToCart({
         customerName: body.customerName,
         customerPhone: body.customerPhone,
-        category: 'other',
-        name: body.customItemName,
+        category,
+        name: itemName,
         karat: body.customKarat,
+        customRatePerTola: body.customRatePerTola,
         weightGrams,
         weightUnit: getWeightUnit(form, 'custom'),
         tolaParts: getWeightUnit(form, 'custom') === 'tola' ? getTolaPartsFromForm(form, 'custom') : null,
@@ -5172,13 +5353,18 @@ document.getElementById('order-form')?.addEventListener('submit', async (e) => {
       form.reset();
       form.quantity.value = 1;
       if (form.customKarat) form.customKarat.value = '24';
+      if (form.customCategory) form.customCategory.value = 'gold';
+      renderCategorySelect(form.customCategory, { defaultValue: 'gold' });
       syncWeightEntryPanels(form, 'custom');
+      syncItemMetalFields(form, METAL_FIELD_PRESETS.order);
       clearOrderCustomer();
       return;
     }
     body.customItem = {
-      name: String(body.customItemName || '').trim(),
+      name: itemName,
+      category,
       karat: Number(body.customKarat) || 24,
+      customRatePerTola: parseMoneyField(body.customRatePerTola || 0),
       weightGrams,
       weightUnit: getWeightUnit(form, 'custom'),
       weightTola: Number(form.customWeightTola?.value) || 0,

@@ -236,6 +236,11 @@ const I18N = {
     close: 'Close',
     sku: 'SKU',
     category: 'Category',
+    itemMetal: 'Metal',
+    itemManualRate: 'Rate per tola',
+    itemUsesGoldRate: 'Using shop gold rate',
+    itemUsesSilverRate: 'Using shop silver rate',
+    itemManualRateRequired: 'Enter a rate per tola for Other metal items.',
     name: 'Name',
     karat: 'Karat',
     weightGrams: 'Weight (grams)',
@@ -266,8 +271,11 @@ const I18N = {
     locationRemoved: 'Location removed.',
     deleteLocationConfirm: 'Remove this location from the list?',
     noLocations: 'No locations added yet.',
-    itemCategories: 'Item categories',
-    itemCategoriesDesc: 'Manage categories shown in inventory and POS dropdowns. "Other" is always included and selected by default for new items.',
+    itemCategories: 'Metal types',
+    itemCategoriesDesc: 'Inventory, orders, and POS use Gold, Silver, or Other. Other items need a name and manual rate.',
+    itemNameOtherPh: 'Required for Other (e.g. Diamond ring, Watch)',
+    itemNameOtherRequired: 'Enter a name for Other metal items.',
+    itemNameOptionalPh: 'Optional — defaults to Gold or Silver',
     addCategory: 'Add category',
     categoryNamePh: 'e.g. Bracelet',
     categoryAdded: 'Category added.',
@@ -314,6 +322,8 @@ const I18N = {
     transactionSaved: 'Transaction saved',
     settingsSaved: 'Settings saved',
     languageSaved: 'Language updated',
+    catGold: 'Gold',
+    catSilver: 'Silver',
     catRing: 'Ring',
     catNecklace: 'Necklace',
     catBangle: 'Bangle',
@@ -810,6 +820,11 @@ const I18N = {
     close: 'बन्द',
     sku: 'SKU',
     category: 'कोटि',
+    itemMetal: 'धातु',
+    itemManualRate: 'प्रति तोला दर',
+    itemUsesGoldRate: 'पसलको सुन दर प्रयोग',
+    itemUsesSilverRate: 'पसलको चाँदी दर प्रयोग',
+    itemManualRateRequired: 'अन्य धातुको लागि प्रति तोला दर लेख्नुहोस्।',
     name: 'नाम',
     karat: 'क्यारेट',
     weightGrams: 'तौल (ग्राम)',
@@ -840,8 +855,11 @@ const I18N = {
     locationRemoved: 'स्थान हटाइयो।',
     deleteLocationConfirm: 'यो स्थान सूचीबाट हटाउने?',
     noLocations: 'अहिलेसम्म कुनै स्थान थपिएको छैन।',
-    itemCategories: 'वस्तु कोटिहरू',
-    itemCategoriesDesc: 'इन्भेन्टरी र POS मा देखिने कोटिहरू व्यवस्थापन गर्नुहोस्। "अन्य" सधैं समावेश हुन्छ र नयाँ वस्तुको लागि पूर्वनिर्धारित हुन्छ।',
+    itemCategories: 'धातु प्रकार',
+    itemCategoriesDesc: 'इन्भेन्टरी, अर्डर र POS मा सुन, चाँदी वा अन्य। अन्य वस्तुको लागि नाम र म्यानुअल दर चाहिन्छ।',
+    itemNameOtherPh: 'अन्यको लागि आवश्यक (उदा. हीरा औंठी, घडी)',
+    itemNameOtherRequired: 'अन्य धातु वस्तुको नाम लेख्नुहोस्।',
+    itemNameOptionalPh: 'वैकल्पिक — सुन वा चाँदी पूर्वनिर्धारित',
     addCategory: 'कोटि थप्नुहोस्',
     categoryNamePh: 'उदा. ब्रेसलेट',
     categoryAdded: 'कोटि थपियो।',
@@ -888,6 +906,8 @@ const I18N = {
     transactionSaved: 'कारोबार सुरक्षित भयो',
     settingsSaved: 'सेटिङ सुरक्षित भयो',
     languageSaved: 'भाषा अपडेट भयो',
+    catGold: 'सुन',
+    catSilver: 'चाँदी',
     catRing: 'औंठी',
     catNecklace: 'माला',
     catBangle: 'चुरा',
@@ -1166,16 +1186,18 @@ function categorySlug(name) {
   return slug || 'other';
 }
 
-const DEFAULT_ITEM_CATEGORIES = ['Ring', 'Necklace', 'Bangle', 'Earring', 'Coin', 'Bar', 'Other'];
+const DEFAULT_ITEM_CATEGORIES = ['Gold', 'Silver', 'Other'];
 
 const BUILTIN_CATEGORY_I18N = {
+  gold: 'catGold',
+  silver: 'catSilver',
+  other: 'catOther',
   ring: 'catRing',
   necklace: 'catNecklace',
   bangle: 'catBangle',
   earring: 'catEarring',
   coin: 'catCoin',
-  bar: 'catBar',
-  other: 'catOther'
+  bar: 'catBar'
 };
 
 let itemCategoryNames = [...DEFAULT_ITEM_CATEGORIES];
