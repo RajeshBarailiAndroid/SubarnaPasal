@@ -204,6 +204,7 @@ function bindAuthClient(client) {
 }
 
 async function initAuth() {
+  if (isAppPage()) scheduleAppShellFailsafe();
   try {
     const res = await fetch('/api/auth/config');
     const cfg = await res.json();

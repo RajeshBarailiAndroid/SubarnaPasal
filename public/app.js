@@ -5118,7 +5118,7 @@ document.getElementById('custom-item-form')?.addEventListener('submit', (e) => {
   const category = fd.get('category') || 'gold';
   const itemName = resolveCustomItemName(category, fd.get('name'));
   if (!validateCustomItemName(category, itemName)) return;
-  if (!validateOtherMetalRate(category, fd.get('customRatePerTola')) return;
+  if (!validateOtherMetalRate(category, fd.get('customRatePerTola'))) return;
   addCustomItemToCart({
     customerName: fd.get('customerName'),
     customerPhone: fd.get('customerPhone'),
@@ -5733,19 +5733,21 @@ async function initApp() {
     if (typeof revealAppShell === 'function') revealAppShell();
   }, 12000);
 
-  let shouldReveal = true;
   try {
     await refreshAll();
   } catch (err) {
     if (/sign in required/i.test(err.message)) {
-      shouldReveal = false;
+      if (typeof redirectToLogin === 'function') redirectToLogin();
     } else if (typeof toast === 'function') {
       toast(err.message);
     }
   } finally {
     window.clearTimeout(revealFailsafe);
-    if (shouldReveal && typeof revealAppShell === 'function') revealAppShell();
+    if (typeof revealAppShell === 'function') revealAppShell();
   }
 }
 
-initApp().catch((err) => toast(err.message));
+initApp().catch((err) => {
+  if (typeof revealAppShell === 'function') revealAppShell();
+  if (typeof toast === 'function') toast(err.message);
+});
