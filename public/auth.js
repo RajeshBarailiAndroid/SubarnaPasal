@@ -3,7 +3,6 @@ let authEnabled = false;
 let signedInUser = null;
 let accountDisplayName = '';
 
-const AUTH_EMAIL_DOMAIN = 'subarnapasal.app';
 const LOGIN_PATH = '/login.html';
 const APP_PATH = '/';
 
@@ -43,10 +42,6 @@ function normalizeUsername(value) {
   return String(value || '').trim().toLowerCase().replace(/\s+/g, '');
 }
 
-function usernameToEmail(username) {
-  return `${normalizeUsername(username)}@${AUTH_EMAIL_DOMAIN}`;
-}
-
 function isValidUsername(username) {
   return /^[a-z0-9_]{3,24}$/.test(username);
 }
@@ -56,7 +51,8 @@ function isValidEmail(email) {
 }
 
 function isValidPassword(password) {
-  return String(password || '').length >= 6;
+  const value = String(password || '');
+  return value.length >= 6 && value.length <= 128;
 }
 
 function showAuthError(formId, message) {
@@ -76,6 +72,7 @@ function clearAuthErrors() {
   showAuthError('signup', '');
   showAuthError('forgot', '');
   showAuthError('reset-password', '');
+  showAuthError('change-password', '');
 }
 
 function shouldForceLogin() {
@@ -296,7 +293,12 @@ async function getAuthAccessToken() {
   return session?.access_token || null;
 }
 
+function getAuthClient() {
+  return authClient;
+}
+
 window.getAuthAccessToken = getAuthAccessToken;
+window.getAuthClient = getAuthClient;
 window.waitForAuthReady = () => authReady;
 window.isAuthRequired = () => authEnabled;
 window.isSignedInSync = () => !authEnabled || Boolean(signedInUser);
@@ -315,12 +317,15 @@ function updateAuthUI(session) {
 
   signedInUser = session?.user || null;
   const settingsLogoutBtn = document.getElementById('settings-logout-btn');
+  const changePasswordForm = document.getElementById('settings-change-password-form');
 
   if (session?.user) {
     renderAccountDisplay(session);
     if (settingsLogoutBtn) settingsLogoutBtn.hidden = false;
-  } else if (settingsLogoutBtn) {
-    settingsLogoutBtn.hidden = true;
+    if (changePasswordForm) changePasswordForm.hidden = !authEnabled;
+  } else {
+    if (settingsLogoutBtn) settingsLogoutBtn.hidden = true;
+    if (changePasswordForm) changePasswordForm.hidden = true;
     accountDisplayName = '';
   }
 
@@ -343,10 +348,6 @@ function authToast(msg) {
   el.hidden = false;
   clearTimeout(authToast._t);
   authToast._t = setTimeout(() => { el.hidden = true; }, 2600);
-}
-
-function goToLoginPage() {
-  redirectToLogin();
 }
 
 async function handleLoginSubmit(e) {
@@ -491,6 +492,65 @@ async function resetAuthClient() {
   await authClient.auth.getSession();
 }
 
+async function handleChangePasswordSubmit(e) {
+  e.preventDefault();
+  if (!authClient || !authEnabled) return;
+
+  const form = e.target;
+  const currentPassword = String(form.elements.currentPassword?.value || '');
+  const password = String(form.elements.password?.value || '');
+  const confirm = String(form.elements.confirm?.value || '');
+
+  if (!currentPassword) {
+    showAuthError('change-password', t('authCurrentPasswordRequired'));
+    return;
+  }
+  if (!isValidPassword(password)) {
+    showAuthError('change-password', t('authInvalidPassword'));
+    return;
+  }
+  if (password !== confirm) {
+    showAuthError('change-password', t('authPasswordMismatch'));
+    return;
+  }
+
+  showAuthError('change-password', '');
+  const submitBtn = form.querySelector('[type="submit"]');
+  if (submitBtn) submitBtn.disabled = true;
+
+  try {
+    const token = await getAuthAccessToken();
+    if (!token) {
+      showAuthError('change-password', t('signInRequired'));
+      return;
+    }
+
+    const res = await fetch('/api/auth/change-password', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ currentPassword, password, confirm })
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      showAuthError('change-password', payload.error || t('changePasswordFailed'));
+      return;
+    }
+
+    form.reset();
+    authToast(t('changePasswordSuccess'));
+    await authClient.auth.signOut({ scope: 'global' }).catch(() => {});
+    await clearAuthStorage();
+    window.setTimeout(() => redirectToLogin(), 900);
+  } catch (err) {
+    showAuthError('change-password', err.message || t('changePasswordFailed'));
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
+}
+
 async function signOut(e) {
   e?.preventDefault?.();
   e?.stopPropagation?.();
@@ -517,13 +577,7 @@ function bindAuthEvents() {
   document.getElementById('login-form')?.addEventListener('submit', handleLoginSubmit);
   document.getElementById('signup-form')?.addEventListener('submit', handleSignupSubmit);
   document.getElementById('settings-logout-btn')?.addEventListener('click', (e) => signOut(e));
-
-  window.addEventListener('message', (e) => {
-    if (e.origin !== window.location.origin || e.data?.type !== 'supabase-auth') return;
-    authClient?.auth.getSession().then(({ data: { session } }) => {
-      if (session) redirectToApp();
-    });
-  });
+  document.getElementById('settings-change-password-form')?.addEventListener('submit', handleChangePasswordSubmit);
 }
 
 document.addEventListener('DOMContentLoaded', () => {

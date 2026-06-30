@@ -554,6 +554,13 @@
             <article class="panel settings-card settings-account-card">
               <h2 data-i18n="accountSection">Account</h2>
               <p class="settings-account-user" id="settings-account-user" hidden></p>
+              <form id="settings-change-password-form" class="settings-form settings-password-form" hidden>
+                <label><span data-i18n="authCurrentPassword">Current password</span><input type="password" name="currentPassword" autocomplete="current-password" required /></label>
+                <label><span data-i18n="authPassword">New password</span><input type="password" name="password" autocomplete="new-password" required /></label>
+                <label><span data-i18n="authConfirmPassword">Confirm password</span><input type="password" name="confirm" autocomplete="new-password" required /></label>
+                <p class="auth-error" id="change-password-error" hidden></p>
+                <button type="submit" class="btn btn-outline" data-i18n="changePassword">Change password</button>
+              </form>
               <div class="settings-account-actions">
                 <button type="button" class="btn btn-outline settings-logout-btn" id="settings-logout-btn" data-i18n="signOut">Log out</button>
               </div>

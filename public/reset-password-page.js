@@ -13,26 +13,32 @@ async function handleResetPasswordSubmit(e) {
   showAuthError('reset-password', '');
 
   await withAuthSubmit(form, async () => {
-    const token = typeof getAuthAccessToken === 'function' ? await getAuthAccessToken() : null;
-    if (!token) {
-      showAuthError('reset-password', t('authResetLinkInvalid'));
-      return;
+    try {
+      if (typeof waitForAuthReady === 'function') {
+        await waitForAuthReady();
+      }
+
+      const client = typeof getAuthClient === 'function' ? getAuthClient() : null;
+      if (!client) {
+        showAuthError('reset-password', t('authNotConfigured'));
+        return;
+      }
+
+      const { data: { session } } = await client.auth.getSession();
+      if (!session?.access_token) {
+        showAuthError('reset-password', t('authResetLinkInvalid'));
+        return;
+      }
+
+      const { error } = await client.auth.updateUser({ password });
+      if (error) throw error;
+
+      await client.auth.signOut({ scope: 'local' }).catch(() => {});
+      authToast(t('authResetPasswordSuccess'));
+      window.location.replace('/login.html');
+    } catch (err) {
+      showAuthError('reset-password', err.message || t('changePasswordFailed'));
     }
-
-    const res = await fetch('/api/auth/config');
-    const cfg = await res.json();
-    if (!cfg.enabled || !cfg.url || !cfg.anonKey) {
-      showAuthError('reset-password', t('authNotConfigured'));
-      return;
-    }
-
-    const client = supabase.createClient(cfg.url, cfg.anonKey);
-    const { error } = await client.auth.updateUser({ password });
-    if (error) throw error;
-
-    await client.auth.signOut({ scope: 'local' }).catch(() => {});
-    authToast(t('authResetPasswordSuccess'));
-    window.location.replace('/login.html');
   });
 }
 
@@ -47,8 +53,9 @@ async function initResetPasswordPage() {
   }
 
   const hasRecoveryHash = window.location.hash.includes('access_token');
-  const token = typeof getAuthAccessToken === 'function' ? await getAuthAccessToken() : null;
-  if (!token && !hasRecoveryHash) {
+  const client = typeof getAuthClient === 'function' ? getAuthClient() : null;
+  const { data: { session } } = client ? await client.auth.getSession() : { data: { session: null } };
+  if (!session?.access_token && !hasRecoveryHash) {
     showAuthError('reset-password', t('authResetLinkInvalid'));
   }
 }

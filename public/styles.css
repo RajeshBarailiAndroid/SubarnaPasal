@@ -3003,6 +3003,15 @@ th {
   gap: 0.65rem;
 }
 
+.settings-password-form {
+  max-width: 28rem;
+  margin-bottom: 1rem;
+}
+
+.settings-password-form .auth-error {
+  margin: 0;
+}
+
 .settings-logout-btn {
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 35%, var(--border));

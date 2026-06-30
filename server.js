@@ -13,28 +13,15 @@ const {
 } = require('./lib/store');
 const {
   readSharedRates,
-  appendSharedTick,
   appendSharedTicks,
   appendSharedHistory,
   getSharedRatesForClient,
   clearSharedRates
 } = require('./lib/shared-rates');
 const { getSupabase, checkSupabaseConnection } = require('./lib/supabase');
-const {
-  normalizeUsername,
-  usernameToEmail,
-  isSyntheticAuthEmail,
-  isValidUsername,
-  isValidEmail,
-  isValidPassword,
-  isAuthConfigured,
-  getAnonAuthClient,
-  findUserByUsername,
-  resolveAuthEmail,
-  getUserIdFromToken,
-  displayNameFromUser,
-  lookupDisplayNameFromDb
-} = require('./lib/auth');
+const { createAttachUser } = require('./lib/middleware/auth');
+const { asyncRoute } = require('./lib/middleware/asyncRoute');
+const { createAuthRouter } = require('./lib/routes/auth');
 const {
   isValidPhone,
   isValidPhoneForRegion,
@@ -46,14 +33,6 @@ const { captureSharedGoldRateIfChanged, recordSharedApiGoldReading, displayToNpr
 
 const CRON_CAPTURE_PATH = '/api/cron/capture-gold-rate';
 
-function isCronAuthorized(req) {
-  const secret = String(process.env.CRON_SECRET || '').trim();
-  if (!secret) return false;
-  const auth = String(req.headers.authorization || '');
-  if (auth === `Bearer ${secret}`) return true;
-  return String(req.headers['x-cron-secret'] || '') === secret;
-}
-
 const app = express();
 const PORT = process.env.PORT || 3002;
 const TOLA_GRAMS = 11.66;
@@ -61,53 +40,11 @@ const AANA_PER_TOLA = 16;
 const LAAL_PER_AANA = 6.25;
 const LAAL_PER_TOLA = AANA_PER_TOLA * LAAL_PER_AANA;
 const DISPLAY_CURRENCY_NPR_PER_UNIT = { USD: 133, CAD: 98, NPR: 1 };
-const PUBLIC_API_PATHS = new Set([
-  '/api/health',
-  '/api/auth/config',
-  '/api/auth/login',
-  '/api/auth/signup',
-  '/api/auth/forgot-password',
-  '/api/auth/reset-password'
-]);
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
-
-async function attachUser(req, res, next) {
-  if (req.path === CRON_CAPTURE_PATH && isCronAuthorized(req)) {
-    req.isCron = true;
-    return next();
-  }
-
-  if (!req.path.startsWith('/api/') || PUBLIC_API_PATHS.has(req.path)) {
-    return next();
-  }
-
-  if (isAuthConfigured()) {
-    const header = req.headers.authorization || '';
-    const token = header.startsWith('Bearer ') ? header.slice(7) : '';
-    const userId = await getUserIdFromToken(token);
-    if (!userId) {
-      return res.status(401).json({ error: 'Sign in required.' });
-    }
-    req.userId = userId;
-    return next();
-  }
-
-  req.userId = LOCAL_DEV_USER_ID;
-  return next();
-}
-
-app.use(attachUser);
-
-function asyncRoute(handler) {
-  return (req, res, next) => {
-    Promise.resolve(handler(req, res, next)).catch((err) => {
-      console.error(err);
-      res.status(500).json({ error: err.message || 'Internal server error.' });
-    });
-  };
-}
+app.use(createAttachUser(CRON_CAPTURE_PATH));
+app.use('/api/auth', createAuthRouter());
 
 function silverRatePerTolaFromSettings(settings) {
   if (settings.silverRatePerTola != null && Number(settings.silverRatePerTola) > 0) {
@@ -304,70 +241,6 @@ function gramsToTola(grams) {
   return Number((grams / TOLA_GRAMS).toFixed(3));
 }
 
-function normalizeRateHistoryEntry(entry) {
-  const updatedAt = entry.updatedAt || new Date().toISOString();
-  const goldRatePerTola = Number(entry.goldRatePerTola) || 0;
-  return {
-    date: entry.date || String(updatedAt).slice(0, 10),
-    goldRatePerTola,
-    goldRatePerGram: Number(entry.goldRatePerGram)
-      || Number((goldRatePerTola / TOLA_GRAMS).toFixed(2)),
-    priceMode: entry.priceMode === 'api' ? 'api' : 'manual',
-    updatedAt
-  };
-}
-
-function trimRateHistory(history) {
-  const byMode = { manual: [], api: [] };
-  history.forEach((row) => {
-    const mode = row.priceMode === 'api' ? 'api' : 'manual';
-    byMode[mode].push(row);
-  });
-  byMode.manual.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  byMode.api.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  return [...byMode.manual.slice(0, 500), ...byMode.api.slice(0, 500)]
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-}
-
-function recordDailyGoldRateSnapshot(store, goldRatePerTola, goldRatePerGram, priceMode = 'manual', localDate) {
-  const tola = Number(goldRatePerTola);
-  if (!Number.isFinite(tola) || tola <= 0) return false;
-
-  const mode = priceMode === 'api' ? 'api' : 'manual';
-  let now = new Date().toISOString();
-  const today = String(localDate || now.slice(0, 10)).slice(0, 10);
-  const gram = Number(goldRatePerGram) || Number((tola / TOLA_GRAMS).toFixed(2));
-  if (!Array.isArray(store.settings.rateHistory)) store.settings.rateHistory = [];
-
-  const history = store.settings.rateHistory.map(normalizeRateHistoryEntry);
-  const lastForMode = history
-    .filter((row) => row.priceMode === mode)
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
-
-  if (lastForMode
-    && lastForMode.goldRatePerTola === tola
-    && lastForMode.goldRatePerGram === gram) {
-    return false;
-  }
-
-  if (lastForMode) {
-    const lastT = new Date(lastForMode.updatedAt).getTime();
-    const minT = lastT + 1000;
-    if (Date.now() < minT) now = new Date(minT).toISOString();
-  }
-
-  history.push({
-    date: today,
-    goldRatePerTola: tola,
-    goldRatePerGram: gram,
-    priceMode: mode,
-    updatedAt: now
-  });
-
-  store.settings.rateHistory = trimRateHistory(history);
-  return true;
-}
-
 function itemValue(item, goldRatePerTola) {
   const goldValue = gramsToTola(item.weightGrams) * goldRatePerTola * (item.karat / 24);
   return Math.round(goldValue + (item.makingCharge || 0));
@@ -431,40 +304,6 @@ function calcGoldPriceNpr(weightGrams, makingCharge, goldRatePerTola, unit = 'gr
   const grams = Number(weightGrams) || 0;
   if (grams <= 0) return 0;
   return Math.round(grams * (rate / TOLA_GRAMS) + making);
-}
-
-async function summarize(store) {
-  const metals = await resolveMetalRates(store);
-  const rate = goldRateForValuation(metals);
-  const inStock = store.items.filter((i) => i.status === 'in_stock' && i.quantity > 0);
-  const totalWeight = inStock.reduce((sum, i) => sum + i.weightGrams * i.quantity, 0);
-  const totalValue = inStock.reduce((sum, i) => sum + itemValue(i, rate) * i.quantity, 0);
-  const lowStock = store.items.filter((i) => i.status === 'in_stock' && i.quantity <= 1);
-
-  return {
-    shopName: store.settings.shopName,
-    goldRatePerTola: metals.goldRatePerTola,
-    goldRatePerTolaNpr: rate,
-    metalRatesLive: metals.live,
-    metalCurrency: metals.currency,
-    currency: store.settings.currency,
-    totalItems: inStock.reduce((sum, i) => sum + i.quantity, 0),
-    uniqueSkus: inStock.length,
-    totalWeightGrams: Number(totalWeight.toFixed(2)),
-    totalWeightTola: gramsToTola(totalWeight),
-    totalInventoryValue: totalValue,
-    lowStockCount: lowStock.length,
-    lowStock,
-    categoryCounts: inStock.reduce((acc, i) => {
-      acc[i.category] = (acc[i.category] || 0) + i.quantity;
-      return acc;
-    }, {}),
-    recentTransactions: [...store.transactions].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 8),
-    pendingOrders: (store.orders || []).filter((o) =>
-      ['pending', 'confirmed', 'progress', 'ready'].includes(o.status)
-    ).length,
-    recentOrders: [...(store.orders || [])].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 5)
-  };
 }
 
 function nextOrderNumber(store) {
@@ -663,373 +502,6 @@ app.get('/api/health', asyncRoute(async (req, res) => {
   });
 }));
 
-app.get('/api/auth/config', (req, res) => {
-  const { readEnv } = require('./lib/env');
-  const url = readEnv('SUPABASE_URL');
-  const anonKey =
-    readEnv('SUPABASE_ANON_KEY') ||
-    readEnv('SUPABASE_PUBLISHABLE_KEY') ||
-    readEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY');
-  const placeholders = ['YOUR_PROJECT_REF', 'your-anon-key', 'your-service-role-key'];
-  const valid = Boolean(
-    url &&
-    anonKey &&
-    url.includes('supabase.co') &&
-    !placeholders.some((p) => url.includes(p) || anonKey.includes(p))
-  );
-  res.json({
-    enabled: valid,
-    url: valid ? url : null,
-    anonKey: valid ? anonKey : null
-  });
-});
-
-app.get('/api/auth/me', asyncRoute(async (req, res) => {
-  if (!isAuthConfigured()) {
-    return res.status(503).json({ error: 'Sign-in is not configured yet.' });
-  }
-
-  const admin = getSupabase();
-  if (!admin) {
-    return res.status(503).json({ error: 'Sign-in is not configured yet.' });
-  }
-
-  const header = req.headers.authorization || '';
-  const token = header.startsWith('Bearer ') ? header.slice(7) : '';
-  const userId = await getUserIdFromToken(token);
-  if (!userId) {
-    return res.status(401).json({ error: 'Sign in required.' });
-  }
-
-  const { data: loaded, error: loadError } = await admin.auth.admin.getUserById(userId);
-  if (loadError || !loaded?.user) {
-    return res.status(404).json({ error: 'Account not found.' });
-  }
-
-  const user = loaded.user;
-  let displayName = await lookupDisplayNameFromDb(admin, user);
-
-  if (displayName && !displayNameFromUser(user)) {
-    await admin.auth.admin.updateUserById(userId, {
-      user_metadata: {
-        ...user.user_metadata,
-        full_name: displayName
-      }
-    });
-  }
-
-  res.json({
-    ok: true,
-    displayName,
-    username: normalizeUsername(user.user_metadata?.username)
-  });
-}));
-
-app.post('/api/auth/signup', asyncRoute(async (req, res) => {
-  if (!isAuthConfigured()) {
-    return res.status(503).json({ error: 'Sign-in is not configured yet.' });
-  }
-
-  const admin = getSupabase();
-  const anon = getAnonAuthClient();
-  if (!admin || !anon) {
-    return res.status(503).json({ error: 'Sign-in is not configured yet.' });
-  }
-
-  const username = normalizeUsername(req.body?.username);
-  const fullName = String(req.body?.full_name || '').trim();
-  const email = String(req.body?.email || '').trim();
-  const phone = String(req.body?.phone || '').trim();
-  const password = String(req.body?.password || '');
-
-  if (!isValidUsername(username)) {
-    return res.status(400).json({ error: 'Username must be 3–24 characters (letters, numbers, underscore).' });
-  }
-  if (!fullName) {
-    return res.status(400).json({ error: 'Enter your full name.' });
-  }
-  if (!email && !phone) {
-    return res.status(400).json({ error: 'Enter an email address or mobile number.' });
-  }
-  if (email && !isValidEmail(email)) {
-    return res.status(400).json({ error: 'Enter a valid email address.' });
-  }
-  if (phone && !isValidPhoneForRegion(phone, req.body?.phoneRegion)) {
-    return res.status(400).json({
-      error: phoneErrorMessage(normalizePhoneRegion(req.body?.phoneRegion))
-    });
-  }
-  if (!isValidPassword(password)) {
-    return res.status(400).json({ error: 'Password must be at least 6 characters.' });
-  }
-
-  const authEmail = email ? email.toLowerCase() : usernameToEmail(username);
-  const existing = await findUserByUsername(admin, username);
-  if (existing) {
-    return res.status(409).json({ error: 'That username is already taken.' });
-  }
-
-  const { data: created, error: createError } = await admin.auth.admin.createUser({
-    email: authEmail,
-    password,
-    email_confirm: true,
-    user_metadata: {
-      username,
-      full_name: fullName,
-      phone: phone || null,
-      contact_email: email || null
-    }
-  });
-
-  if (createError) {
-    const message = createError.message?.includes('already registered')
-      ? 'That username is already taken.'
-      : (createError.message || 'Could not create account.');
-    return res.status(400).json({ error: message });
-  }
-
-  if (created?.user?.id) {
-    try {
-      await ensureUserSettings(admin, created.user.id);
-    } catch (err) {
-      console.warn(`Default settings not created for ${created.user.id}:`, err.message);
-    }
-  }
-
-  const { data, error: signInError } = await anon.auth.signInWithPassword({
-    email: authEmail,
-    password
-  });
-
-  if (signInError) {
-    return res.status(201).json({
-      ok: true,
-      session: null,
-      message: 'Account created. You can log in now.'
-    });
-  }
-
-  res.status(201).json({ ok: true, session: data.session });
-}));
-
-app.post('/api/auth/login', asyncRoute(async (req, res) => {
-  if (!isAuthConfigured()) {
-    return res.status(503).json({ error: 'Sign-in is not configured yet.' });
-  }
-
-  const admin = getSupabase();
-  const anon = getAnonAuthClient();
-  if (!admin || !anon) {
-    return res.status(503).json({ error: 'Sign-in is not configured yet.' });
-  }
-
-  const username = normalizeUsername(req.body?.username);
-  const password = String(req.body?.password || '');
-
-  if (!isValidUsername(username)) {
-    return res.status(400).json({ error: 'Username must be 3–24 characters (letters, numbers, underscore).' });
-  }
-  if (!isValidPassword(password)) {
-    return res.status(400).json({ error: 'Password must be at least 6 characters.' });
-  }
-
-  const authEmail = await resolveAuthEmail(admin, username);
-  let { data, error } = await anon.auth.signInWithPassword({ email: authEmail, password });
-
-  if (error?.message === 'Invalid login credentials' || error?.message === 'Email not confirmed') {
-    const existing = await findUserByUsername(admin, username);
-    if (existing && !existing.email_confirmed_at) {
-      await admin.auth.admin.updateUserById(existing.id, { email_confirm: true });
-      ({ data, error } = await anon.auth.signInWithPassword({ email: authEmail, password }));
-    }
-  }
-
-  if (error) {
-    const message = error.message === 'Invalid login credentials'
-      ? 'Incorrect username or password.'
-      : error.message;
-    return res.status(401).json({ error: message });
-  }
-
-  res.json({ ok: true, session: data.session });
-}));
-
-function getRecoveryRedirectUrl(req) {
-  const configured = process.env.APP_URL || process.env.PUBLIC_APP_URL;
-  if (configured) {
-    return `${String(configured).replace(/\/$/, '')}/reset-password.html`;
-  }
-  const host = req.get('x-forwarded-host') || req.get('host') || 'localhost:3002';
-  const proto = req.get('x-forwarded-proto') || req.protocol || 'http';
-  return `${proto}://${host}/reset-password.html`;
-}
-
-function emailMatchesAccount(user, email) {
-  const provided = String(email || '').trim().toLowerCase();
-  if (!provided) return false;
-  const contact = String(user.user_metadata?.contact_email || '').trim().toLowerCase();
-  const authEmail = String(user.email || '').trim().toLowerCase();
-  return provided === contact || provided === authEmail;
-}
-
-function authErrorMessage(error) {
-  if (!error) return '';
-  const message = String(error.message || error.msg || '').trim();
-  if (!message || message === '{}') {
-    return 'Could not send reset link. Try again in a few minutes.';
-  }
-  if (/rate limit/i.test(message)) {
-    return 'Too many reset emails sent. Please wait about an hour and try again.';
-  }
-  return message;
-}
-
-app.post('/api/auth/forgot-password', asyncRoute(async (req, res) => {
-  if (!isAuthConfigured()) {
-    return res.status(503).json({ error: 'Sign-in is not configured yet.' });
-  }
-
-  const admin = getSupabase();
-  const anon = getAnonAuthClient();
-  if (!admin || !anon) {
-    return res.status(503).json({ error: 'Sign-in is not configured yet.' });
-  }
-
-  const username = normalizeUsername(req.body?.username);
-  const email = String(req.body?.email || '').trim();
-
-  if (!isValidUsername(username)) {
-    return res.status(400).json({ error: 'Enter a valid username.' });
-  }
-  if (!email || !isValidEmail(email)) {
-    return res.status(400).json({ error: 'Enter the email on your account.' });
-  }
-
-  const user = await findUserByUsername(admin, username);
-  if (!user) {
-    return res.status(404).json({ error: 'No account found with that username.' });
-  }
-  if (!emailMatchesAccount(user, email)) {
-    return res.status(400).json({ error: 'That email does not match this account.' });
-  }
-
-  const deliverTo = email.trim().toLowerCase();
-  const authEmail = String(user.email || '').trim().toLowerCase();
-  let resetEmail = isSyntheticAuthEmail(authEmail) ? deliverTo : authEmail;
-
-  if (isSyntheticAuthEmail(authEmail) && deliverTo !== authEmail) {
-    const { error: syncError } = await admin.auth.admin.updateUserById(user.id, {
-      email: deliverTo,
-      email_confirm: true
-    });
-    if (syncError) {
-      console.warn('Forgot password email sync:', authErrorMessage(syncError));
-    } else {
-      resetEmail = deliverTo;
-    }
-  }
-
-  let { error } = await anon.auth.resetPasswordForEmail(resetEmail, {
-    redirectTo: getRecoveryRedirectUrl(req)
-  });
-
-  if (error && isSyntheticAuthEmail(authEmail) && resetEmail !== authEmail) {
-    ({ error } = await anon.auth.resetPasswordForEmail(authEmail, {
-      redirectTo: getRecoveryRedirectUrl(req)
-    }));
-  }
-
-  if (error) {
-    console.warn('Forgot password email:', authErrorMessage(error));
-    return res.status(500).json({ error: authErrorMessage(error) });
-  }
-
-  return res.json({
-    ok: true,
-    message: 'A reset link was sent to your email. Check your inbox and spam folder.'
-  });
-}));
-
-app.patch('/api/auth/profile', asyncRoute(async (req, res) => {
-  if (!isAuthConfigured()) {
-    return res.status(503).json({ error: 'Sign-in is not configured yet.' });
-  }
-
-  const admin = getSupabase();
-  if (!admin) {
-    return res.status(503).json({ error: 'Sign-in is not configured yet.' });
-  }
-
-  const header = req.headers.authorization || '';
-  const token = header.startsWith('Bearer ') ? header.slice(7) : '';
-  const userId = await getUserIdFromToken(token);
-  if (!userId) {
-    return res.status(401).json({ error: 'Sign in required.' });
-  }
-
-  const fullName = String(req.body?.full_name || '').trim();
-  if (!fullName) {
-    return res.status(400).json({ error: 'Enter your full name.' });
-  }
-
-  const { data: existing, error: loadError } = await admin.auth.admin.getUserById(userId);
-  if (loadError || !existing?.user) {
-    return res.status(404).json({ error: 'Account not found.' });
-  }
-
-  const { data, error } = await admin.auth.admin.updateUserById(userId, {
-    user_metadata: {
-      ...existing.user.user_metadata,
-      full_name: fullName
-    }
-  });
-  if (error) {
-    return res.status(400).json({ error: error.message || 'Could not save your name.' });
-  }
-
-  res.json({ ok: true, user: data.user });
-}));
-
-app.post('/api/auth/reset-password', asyncRoute(async (req, res) => {
-  if (!isAuthConfigured()) {
-    return res.status(503).json({ error: 'Sign-in is not configured yet.' });
-  }
-
-  const admin = getSupabase();
-  if (!admin) {
-    return res.status(503).json({ error: 'Sign-in is not configured yet.' });
-  }
-
-  const username = normalizeUsername(req.body?.username);
-  const email = String(req.body?.email || '').trim();
-  const password = String(req.body?.password || '');
-  const confirm = String(req.body?.confirm || '');
-
-  if (!isValidUsername(username)) {
-    return res.status(400).json({ error: 'Enter a valid username.' });
-  }
-  if (!email || !isValidEmail(email)) {
-    return res.status(400).json({ error: 'Enter the email on your account.' });
-  }
-  if (!isValidPassword(password)) {
-    return res.status(400).json({ error: 'Password must be at least 6 characters.' });
-  }
-  if (password !== confirm) {
-    return res.status(400).json({ error: 'Passwords do not match.' });
-  }
-
-  const user = await findUserByUsername(admin, username);
-  if (!user || !emailMatchesAccount(user, email)) {
-    return res.status(400).json({ error: 'Username and email do not match our records.' });
-  }
-
-  const { error } = await admin.auth.admin.updateUserById(user.id, { password });
-  if (error) {
-    return res.status(400).json({ error: error.message || 'Could not reset password.' });
-  }
-
-  res.json({ ok: true, message: 'Password updated. You can log in now.' });
-}));
 
 app.get('/api/cron/capture-gold-rate', asyncRoute(async (req, res) => {
   if (!req.isCron) {
@@ -1075,26 +547,10 @@ app.get('/api/shared/gold-rates', asyncRoute(async (req, res) => {
   res.json(data);
 }));
 
-app.post('/api/shared/gold-rates/tick', asyncRoute(async (req, res) => {
-  await appendSharedTick(req.body);
-  res.json({ ok: true });
-}));
-
 app.post('/api/shared/gold-rates/ticks', asyncRoute(async (req, res) => {
   const ticks = Array.isArray(req.body.ticks) ? req.body.ticks : [];
   const result = await appendSharedTicks(ticks);
   res.json({ ok: true, count: result.count });
-}));
-
-app.post('/api/shared/gold-rates/history', asyncRoute(async (req, res) => {
-  const result = await appendSharedHistory(req.body);
-  res.json({ changed: result.changed, rateHistory: result.history });
-}));
-
-app.delete('/api/shared/gold-rates', asyncRoute(async (req, res) => {
-  const priceMode = req.query.priceMode === 'api' ? 'api' : 'manual';
-  const result = await clearSharedRates(priceMode);
-  res.json({ rateHistory: result.history });
 }));
 
 app.get('/api/reports', asyncRoute(async (req, res) => {
@@ -1102,11 +558,6 @@ app.get('/api/reports', asyncRoute(async (req, res) => {
   const end = req.query.end ? String(req.query.end).slice(0, 10) : null;
   const store = await readStore(req.userId);
   res.json(await buildReports(store, start, end));
-}));
-
-app.get('/api/summary', asyncRoute(async (req, res) => {
-  const store = await readStore(req.userId);
-  res.json(await summarize(store));
 }));
 
 app.get('/api/settings', asyncRoute(async (req, res) => {
